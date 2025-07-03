@@ -76,30 +76,31 @@ enum CustomerType {
 // ===== PRODUCTOS E INVENTARIO =====
 model Category {
   id          String    @id @default(cuid())
-  name        String    @unique
+  name        String    
   description String?
   isActive    Boolean   @default(true)
+  
+  // Jerarquía de categorías
+  parentId    String?   // ID de la categoría padre (null para categorías principales)
+  level       Int       @default(0) // 0 = Principal, 1 = Subcategoría, etc.
+  path        String?   // Ruta jerárquica ej: "Bicicletas/Mountain Bike"
+  
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
   // Relaciones
-  products Product[]
+  parent      Category? @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children    Category[] @relation("CategoryHierarchy")
+  products    Product[]
 
+  // Índices para optimizar consultas jerárquicas
+  @@index([parentId])
+  @@index([level])
+  @@unique([name, parentId]) // Nombres únicos dentro del mismo nivel padre
   @@map("categories")
 }
 
-model Brand {
-  id        String    @id @default(cuid())
-  name      String    @unique
-  isActive  Boolean   @default(true)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
 
-  // Relaciones
-  products Product[]
-
-  @@map("brands")
-}
 
 model Product {
   id          String      @id @default(cuid())
@@ -107,7 +108,7 @@ model Product {
   name        String
   description String?
   categoryId  String
-  brandId     String
+  brand       String      // Cambiar de brandId a brand como texto libre
   costPrice   Decimal     @db.Decimal(10, 2)
   salePrice   Decimal     @db.Decimal(10, 2)
   stock       Int         @default(0)
@@ -121,7 +122,6 @@ model Product {
 
   // Relaciones
   category       Category        @relation(fields: [categoryId], references: [id])
-  brand          Brand           @relation(fields: [brandId], references: [id])
   saleItems      SaleItem[]
   inventoryMoves InventoryMove[]
   serviceOrderItems ServiceOrderItem[]

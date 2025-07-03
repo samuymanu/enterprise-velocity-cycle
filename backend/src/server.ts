@@ -39,7 +39,13 @@ const server = createServer(app);
 // Configurar Socket.IO para tiempo real
 const io = new Server(server, {
   cors: {
-    origin: process.env.SOCKET_CORS_ORIGIN || "http://localhost:8080",
+    origin: [
+      "http://localhost:8080",
+      "http://localhost:8081", 
+      "http://localhost:8082",
+      "http://localhost:3000",
+      "http://localhost:5173"
+    ],
     methods: ["GET", "POST"]
   }
 });
@@ -61,12 +67,41 @@ app.use(limiter); // Rate limiting
 
 // CORS configurado
 app.use(cors({
-  origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:8080'],
-  credentials: true
+  origin: function (origin, callback) {
+    // Permitir requests sin origin (como desde aplicaciones móviles o Postman)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = process.env.CORS_ORIGIN?.split(',') || [
+      'http://localhost:8080',
+      'http://localhost:8081',
+      'http://localhost:8082',
+      'http://localhost:3000',
+      'http://localhost:5173'
+    ];
+    
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    return callback(new Error('No permitido por CORS'), false);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Authorization']
 }));
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Manejar preflight requests
+app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.sendStatus(200);
+});
 
 // Rutas públicas (no requieren autenticación)
 app.use('/api/auth', authRoutes);
@@ -82,8 +117,12 @@ app.get('/api/health', (req, res) => {
 
 // Middleware de autenticación para rutas protegidas
 app.use('/api', (req, res, next) => {
-  // Excluir rutas públicas
-  if (req.path.startsWith('/auth') || req.path === '/health') {
+  // Excluir rutas públicas - usar la URL completa
+  if (req.url.startsWith('/auth') || req.url === '/health') {
+    return next();
+  }
+  // Permitir GET para categorías y marcas (para formularios)
+  if ((req.url.startsWith('/categories') || req.url.startsWith('/brands')) && req.method === 'GET') {
     return next();
   }
   // Aplicar autenticación para todas las demás rutas /api/*

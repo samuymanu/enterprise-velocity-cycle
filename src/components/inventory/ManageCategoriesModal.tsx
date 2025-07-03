@@ -1,0 +1,284 @@
+import { useState, useEffect } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Trash2, Plus, FolderPlus } from "lucide-react";
+import { apiService } from "@/lib/api";
+
+interface ManageCategoriesModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onDataChange: () => void;
+}
+
+export function ManageCategoriesModal({ isOpen, onClose, onDataChange }: ManageCategoriesModalProps) {
+  const [categories, setCategories] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  
+  // Estado para crear categoría principal
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [newCategoryDescription, setNewCategoryDescription] = useState('');
+  const [creatingCategory, setCreatingCategory] = useState(false);
+  
+  // Estado para crear subcategoría
+  const [newSubcategoryName, setNewSubcategoryName] = useState('');
+  const [newSubcategoryDescription, setNewSubcategoryDescription] = useState('');
+  const [selectedParentId, setSelectedParentId] = useState('');
+  const [creatingSubcategory, setCreatingSubcategory] = useState(false);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const categoriesData = await apiService.categories.getAll();
+      setCategories(categoriesData.categories || []);
+    } catch (error) {
+      console.error('Error cargando datos:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      loadData();
+    }
+  }, [isOpen]);
+
+  const handleCreateCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCategoryName.trim()) return;
+
+    setCreatingCategory(true);
+    try {
+      await apiService.categories.create({
+        name: newCategoryName.trim(),
+        description: newCategoryDescription.trim()
+      });
+      
+      setNewCategoryName('');
+      setNewCategoryDescription('');
+      await loadData();
+      onDataChange();
+    } catch (error: any) {
+      alert('Error al crear categoría: ' + (error.message || 'Error desconocido'));
+    } finally {
+      setCreatingCategory(false);
+    }
+  };
+
+  const handleCreateSubcategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSubcategoryName.trim() || !selectedParentId) return;
+
+    setCreatingSubcategory(true);
+    try {
+      await apiService.categories.createSubcategory({
+        name: newSubcategoryName.trim(),
+        description: newSubcategoryDescription.trim(),
+        parentId: selectedParentId
+      });
+      
+      setNewSubcategoryName('');
+      setNewSubcategoryDescription('');
+      setSelectedParentId('');
+      await loadData();
+      onDataChange();
+    } catch (error: any) {
+      alert('Error al crear subcategoría: ' + (error.message || 'Error desconocido'));
+    } finally {
+      setCreatingSubcategory(false);
+    }
+  };
+
+  const handleDeleteCategory = async (categoryId: string, categoryName: string) => {
+    if (!confirm(`¿Estás seguro de que quieres eliminar la categoría "${categoryName}"?`)) {
+      return;
+    }
+
+    try {
+      await apiService.categories.delete(categoryId);
+      await loadData();
+      onDataChange();
+    } catch (error: any) {
+      alert('Error al eliminar categoría: ' + (error.message || 'Error desconocido'));
+    }
+  };
+
+  const getParentCategories = () => categories.filter(cat => !cat.parentId);
+  const getSubcategories = (parentId: string) => categories.filter(cat => cat.parentId === parentId);
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Gestionar Categorías</DialogTitle>
+        </DialogHeader>
+
+        <Tabs defaultValue="categories" className="w-full">
+          <TabsList className="grid w-full grid-cols-1">
+            <TabsTrigger value="categories">Categorías</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="categories" className="space-y-6">
+            {/* Crear Categoría Principal */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FolderPlus className="h-5 w-5" />
+                  Nueva Categoría Principal
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleCreateCategory} className="space-y-4">
+                  <div>
+                    <Label htmlFor="categoryName">Nombre</Label>
+                    <Input
+                      id="categoryName"
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      placeholder="Ej: Bicicletas"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="categoryDescription">Descripción (opcional)</Label>
+                    <Textarea
+                      id="categoryDescription"
+                      value={newCategoryDescription}
+                      onChange={(e) => setNewCategoryDescription(e.target.value)}
+                      placeholder="Descripción de la categoría"
+                    />
+                  </div>
+                  <Button type="submit" disabled={creatingCategory || !newCategoryName.trim()}>
+                    {creatingCategory ? 'Creando...' : 'Crear Categoría'}
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+
+            {/* Crear Subcategoría */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Plus className="h-5 w-5" />
+                  Nueva Subcategoría
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleCreateSubcategory} className="space-y-4">
+                  <div>
+                    <Label htmlFor="parentCategory">Categoría Principal</Label>
+                    <Select value={selectedParentId} onValueChange={setSelectedParentId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecciona una categoría principal" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {getParentCategories().map((category) => (
+                          <SelectItem key={category.id} value={category.id}>
+                            {category.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label htmlFor="subcategoryName">Nombre</Label>
+                    <Input
+                      id="subcategoryName"
+                      value={newSubcategoryName}
+                      onChange={(e) => setNewSubcategoryName(e.target.value)}
+                      placeholder="Ej: Cauchos de Bicicleta"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="subcategoryDescription">Descripción (opcional)</Label>
+                    <Textarea
+                      id="subcategoryDescription"
+                      value={newSubcategoryDescription}
+                      onChange={(e) => setNewSubcategoryDescription(e.target.value)}
+                      placeholder="Descripción de la subcategoría"
+                    />
+                  </div>
+                  <Button 
+                    type="submit" 
+                    disabled={creatingSubcategory || !newSubcategoryName.trim() || !selectedParentId}
+                  >
+                    {creatingSubcategory ? 'Creando...' : 'Crear Subcategoría'}
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+
+            {/* Lista de Categorías */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Categorías Existentes</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loading ? (
+                  <p>Cargando categorías...</p>
+                ) : (
+                  <div className="space-y-4">
+                    {getParentCategories().map((category) => (
+                      <div key={category.id} className="border rounded-lg p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <div>
+                            <h4 className="font-semibold">{category.name}</h4>
+                            {category.description && (
+                              <p className="text-sm text-muted-foreground">{category.description}</p>
+                            )}
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleDeleteCategory(category.id, category.name)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        
+                        {/* Subcategorías */}
+                        <div className="ml-4 space-y-2">
+                          {getSubcategories(category.id).map((subcategory) => (
+                            <div key={subcategory.id} className="flex items-center justify-between p-2 bg-muted rounded">
+                              <div>
+                                <span className="text-sm">{subcategory.name}</span>
+                                {subcategory.description && (
+                                  <p className="text-xs text-muted-foreground">{subcategory.description}</p>
+                                )}
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteCategory(subcategory.id, subcategory.name)}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+
+        <div className="flex justify-end pt-4">
+          <Button variant="outline" onClick={onClose}>
+            Cerrar
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

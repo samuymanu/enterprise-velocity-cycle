@@ -194,6 +194,33 @@
   .page-header {
     @apply flex items-center justify-between border-b border-border bg-background-secondary px-6 py-4;
   }
+
+  /* Select component improvements for modals */
+  [data-state="open"] [data-radix-select-content] {
+    @apply bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 shadow-lg;
+    backdrop-filter: blur(0) !important;
+  }
+
+  [data-radix-select-trigger] {
+    @apply bg-white dark:bg-gray-950 border-gray-300 dark:border-gray-700;
+  }
+
+  [data-radix-select-trigger]:hover {
+    @apply border-gray-400 dark:border-gray-600;
+  }
+
+  [data-radix-select-item] {
+    @apply bg-transparent hover:bg-gray-100 dark:hover:bg-gray-800;
+  }
+
+  [data-radix-select-item][data-highlighted] {
+    @apply bg-blue-50 dark:bg-blue-900/20 text-blue-900 dark:text-blue-100;
+  }
+
+  /* Modal-specific select improvements */
+  [data-radix-dialog-content] [data-radix-select-content] {
+    @apply bg-white dark:bg-gray-950 z-[60];
+  }
 }
 
 @layer base {

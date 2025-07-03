@@ -193,22 +193,14 @@ async function main() {
 
   console.log('✅ Categorías jerárquicas creadas');
 
-  // Crear marcas por defecto
-  const brands = await Promise.all([
+  // Crear marcas específicas por categoría
+  
+  // Marcas para Bicicletas
+  const bicycleBrands = await Promise.all([
     prisma.brand.upsert({
       where: { name: 'Trek' },
       update: {},
       create: { name: 'Trek' }
-    }),
-    prisma.brand.upsert({
-      where: { name: 'Honda' },
-      update: {},
-      create: { name: 'Honda' }
-    }),
-    prisma.brand.upsert({
-      where: { name: 'Bell' },
-      update: {},
-      create: { name: 'Bell' }
     }),
     prisma.brand.upsert({
       where: { name: 'Specialized' },
@@ -216,13 +208,152 @@ async function main() {
       create: { name: 'Specialized' }
     }),
     prisma.brand.upsert({
-      where: { name: 'Yamaha' },
+      where: { name: 'Giant' },
       update: {},
-      create: { name: 'Yamaha' }
+      create: { name: 'Giant' }
+    }),
+    prisma.brand.upsert({
+      where: { name: 'Cannondale' },
+      update: {},
+      create: { name: 'Cannondale' }
     })
   ]);
 
-  console.log('✅ Marcas creadas:', brands.length);
+  // Marcas para Motocicletas
+  const motorcycleBrands = await Promise.all([
+    prisma.brand.upsert({
+      where: { name: 'Honda' },
+      update: {},
+      create: { name: 'Honda' }
+    }),
+    prisma.brand.upsert({
+      where: { name: 'Yamaha' },
+      update: {},
+      create: { name: 'Yamaha' }
+    }),
+    prisma.brand.upsert({
+      where: { name: 'Kawasaki' },
+      update: {},
+      create: { name: 'Kawasaki' }
+    }),
+    prisma.brand.upsert({
+      where: { name: 'Suzuki' },
+      update: {},
+      create: { name: 'Suzuki' }
+    })
+  ]);
+
+  // Marcas para Repuestos
+  const partsBrands = await Promise.all([
+    prisma.brand.upsert({
+      where: { name: 'Shimano' },
+      update: {},
+      create: { name: 'Shimano' }
+    }),
+    prisma.brand.upsert({
+      where: { name: 'SRAM' },
+      update: {},
+      create: { name: 'SRAM' }
+    }),
+    prisma.brand.upsert({
+      where: { name: 'Campagnolo' },
+      update: {},
+      create: { name: 'Campagnolo' }
+    })
+  ]);
+
+  // Marcas para Accesorios
+  const accessoryBrands = await Promise.all([
+    prisma.brand.upsert({
+      where: { name: 'Bell' },
+      update: {},
+      create: { name: 'Bell' }
+    }),
+    prisma.brand.upsert({
+      where: { name: 'Giro' },
+      update: {},
+      create: { name: 'Giro' }
+    }),
+    prisma.brand.upsert({
+      where: { name: 'Cateye' },
+      update: {},
+      create: { name: 'Cateye' }
+    })
+  ]);
+
+  // Asociar marcas con categorías usando BrandCategory
+  await Promise.all([
+    // Marcas para Bicicletas
+    ...bicycleBrands.map(brand => 
+      prisma.brandCategory.upsert({
+        where: { 
+          brandId_categoryId: {
+            brandId: brand.id,
+            categoryId: bicicletasCategory.id
+          }
+        },
+        update: {},
+        create: {
+          brandId: brand.id,
+          categoryId: bicicletasCategory.id
+        }
+      })
+    ),
+    
+    // Marcas para Motocicletas
+    ...motorcycleBrands.map(brand => 
+      prisma.brandCategory.upsert({
+        where: { 
+          brandId_categoryId: {
+            brandId: brand.id,
+            categoryId: motocicletasCategory.id
+          }
+        },
+        update: {},
+        create: {
+          brandId: brand.id,
+          categoryId: motocicletasCategory.id
+        }
+      })
+    ),
+    
+    // Marcas para Repuestos
+    ...partsBrands.map(brand => 
+      prisma.brandCategory.upsert({
+        where: { 
+          brandId_categoryId: {
+            brandId: brand.id,
+            categoryId: repuestosCategory.id
+          }
+        },
+        update: {},
+        create: {
+          brandId: brand.id,
+          categoryId: repuestosCategory.id
+        }
+      })
+    ),
+    
+    // Marcas para Accesorios
+    ...accessoryBrands.map(brand => 
+      prisma.brandCategory.upsert({
+        where: { 
+          brandId_categoryId: {
+            brandId: brand.id,
+            categoryId: accesoriosCategory.id
+          }
+        },
+        update: {},
+        create: {
+          brandId: brand.id,
+          categoryId: accesoriosCategory.id
+        }
+      })
+    )
+  ]);
+
+  const allBrands = [...bicycleBrands, ...motorcycleBrands, ...partsBrands, ...accessoryBrands];
+  console.log('✅ Marcas creadas y asociadas a categorías:', allBrands.length);
 
   // Obtener categorías para crear productos
   const allCategories = await prisma.category.findMany();
@@ -232,11 +363,13 @@ async function main() {
   const helmetCategory = allCategories.find((c: { name: string }) => c.name === 'Accesorios');
   const repuestosData = allCategories.find((c: { name: string }) => c.name === 'Repuestos');
   
-  const trekBrand = brands.find(b => b.name === 'Trek');
-  const hondaBrand = brands.find(b => b.name === 'Honda');
-  const bellBrand = brands.find(b => b.name === 'Bell');
+  // Obtener marcas específicas
+  const trekBrand = bicycleBrands.find((b: { name: string }) => b.name === 'Trek');
+  const hondaBrand = motorcycleBrands.find((b: { name: string }) => b.name === 'Honda');
+  const bellBrand = accessoryBrands.find((b: { name: string }) => b.name === 'Bell');
+  const shimanoBrand = partsBrands.find((b: { name: string }) => b.name === 'Shimano');
 
-  if (bicycleCategory !== undefined && motorcycleCategory !== undefined && helmetCategory !== undefined && trekBrand !== undefined && hondaBrand !== undefined && bellBrand !== undefined) {
+  if (bicycleCategory !== undefined && motorcycleCategory !== undefined && helmetCategory !== undefined && trekBrand !== undefined && hondaBrand !== undefined && bellBrand !== undefined && shimanoBrand !== undefined) {
     const products = await Promise.all([
       prisma.product.upsert({
         where: { sku: 'BIC-001' },
@@ -292,10 +425,10 @@ async function main() {
         update: {},
         create: {
           sku: 'ACC-001',
-          name: 'Luz LED Delantera',
+          name: 'Luz LED Delantera Cateye',
           description: 'Luz LED alta potencia para bicicleta',
           categoryId: helmetCategory.id,
-          brandId: bellBrand.id,
+          brandId: accessoryBrands.find((b: { name: string }) => b.name === 'Cateye')?.id || bellBrand.id,
           costPrice: 25.00,
           salePrice: 39.99,
           stock: 3,
@@ -308,10 +441,10 @@ async function main() {
         update: {},
         create: {
           sku: 'REP-001',
-          name: 'Cadena de Bicicleta 10V',
-          description: 'Cadena para bicicleta 10 velocidades',
+          name: 'Cadena de Bicicleta Shimano 10V',
+          description: 'Cadena Shimano para bicicleta 10 velocidades',
           categoryId: repuestosData?.id || helmetCategory.id,
-          brandId: trekBrand.id,
+          brandId: shimanoBrand.id,
           costPrice: 15.00,
           salePrice: 29.99,
           stock: 0,
