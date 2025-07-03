@@ -21,6 +21,12 @@ import inventoryRoutes from './routes/inventory';
 import dashboardRoutes from './routes/dashboard';
 
 // Importar middleware
+// Asegúrate de que el archivo exista en './middleware/errorHandler.ts' o corrige la ruta/nombre si es necesario
+// import { errorHandler } from './middleware/errorHandler';
+// Asegúrate de que el archivo exista o corrige la ruta a la ubicación correcta
+// Ejemplo si está en 'middlewares' en vez de 'middleware':
+// import { errorHandler } from './middlewares/errorHandler';
+
 import { errorHandler } from './middleware/errorHandler';
 import { authMiddleware } from './middleware/auth';
 
@@ -75,7 +81,14 @@ app.get('/api/health', (req, res) => {
 });
 
 // Middleware de autenticación para rutas protegidas
-app.use('/api', authMiddleware);
+app.use('/api', (req, res, next) => {
+  // Excluir rutas públicas
+  if (req.path.startsWith('/auth') || req.path === '/health') {
+    return next();
+  }
+  // Aplicar autenticación para todas las demás rutas /api/*
+  return authMiddleware(req, res, next);
+});
 
 // Rutas protegidas
 app.use('/api/users', userRoutes);
