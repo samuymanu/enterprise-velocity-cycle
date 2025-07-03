@@ -1,0 +1,291 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ===== USUARIOS Y AUTENTICACIÓN =====
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  username  String   @unique
+  password  String
+  firstName String
+  lastName  String
+  role      UserRole @default(EMPLOYEE)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relaciones
+  sales          Sale[]
+  serviceOrders  ServiceOrder[]
+  inventoryMoves InventoryMove[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+  TECHNICIAN
+  CASHIER
+}
+
+// ===== CLIENTES =====
+model Customer {
+  id             String      @id @default(cuid())
+  documentType   String      // CI, RIF, Passport
+  documentNumber String      @unique
+  firstName      String?
+  lastName       String?
+  companyName    String?
+  customerType   CustomerType @default(INDIVIDUAL)
+  email          String?
+  phone          String?
+  address        String?
+  city           String?
+  state          String?
+  postalCode     String?
+  creditLimit    Decimal     @default(0) @db.Decimal(10, 2)
+  currentBalance Decimal     @default(0) @db.Decimal(10, 2)
+  isActive       Boolean     @default(true)
+  notes          String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  // Relaciones
+  sales         Sale[]
+  serviceOrders ServiceOrder[]
+
+  @@map("customers")
+}
+
+enum CustomerType {
+  INDIVIDUAL
+  COMPANY
+}
+
+// ===== PRODUCTOS E INVENTARIO =====
+model Category {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relaciones
+  products Product[]
+
+  @@map("categories")
+}
+
+model Brand {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  // Relaciones
+  products Product[]
+
+  @@map("brands")
+}
+
+model Product {
+  id          String      @id @default(cuid())
+  sku         String      @unique
+  name        String
+  description String?
+  categoryId  String
+  brandId     String
+  costPrice   Decimal     @db.Decimal(10, 2)
+  salePrice   Decimal     @db.Decimal(10, 2)
+  stock       Int         @default(0)
+  minStock    Int         @default(0)
+  maxStock    Int?
+  barcode     String?     @unique
+  images      String[]    @default([])
+  status      ProductStatus @default(ACTIVE)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Relaciones
+  category       Category        @relation(fields: [categoryId], references: [id])
+  brand          Brand           @relation(fields: [brandId], references: [id])
+  saleItems      SaleItem[]
+  inventoryMoves InventoryMove[]
+  serviceOrderItems ServiceOrderItem[]
+
+  @@map("products")
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+  DISCONTINUED
+}
+
+// ===== MOVIMIENTOS DE INVENTARIO =====
+model InventoryMove {
+  id        String            @id @default(cuid())
+  productId String
+  type      InventoryMoveType
+  quantity  Int
+  reason    String?
+  userId    String
+  createdAt DateTime          @default(now())
+
+  // Relaciones
+  product Product @relation(fields: [productId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@map("inventory_moves")
+}
+
+enum InventoryMoveType {
+  IN
+  OUT
+  ADJUSTMENT
+  TRANSFER
+}
+
+// ===== VENTAS =====
+model Sale {
+  id            String     @id @default(cuid())
+  saleNumber    String     @unique
+  customerId    String
+  userId        String
+  subtotal      Decimal    @db.Decimal(10, 2)
+  tax           Decimal    @db.Decimal(10, 2)
+  discount      Decimal    @default(0) @db.Decimal(10, 2)
+  total         Decimal    @db.Decimal(10, 2)
+  paymentMethod PaymentMethod
+  status        SaleStatus @default(COMPLETED)
+  notes         String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  // Relaciones
+  customer  Customer   @relation(fields: [customerId], references: [id])
+  user      User       @relation(fields: [userId], references: [id])
+  saleItems SaleItem[]
+
+  @@map("sales")
+}
+
+model SaleItem {
+  id        String  @id @default(cuid())
+  saleId    String
+  productId String
+  quantity  Int
+  unitPrice Decimal @db.Decimal(10, 2)
+  total     Decimal @db.Decimal(10, 2)
+
+  // Relaciones
+  sale    Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("sale_items")
+}
+
+enum PaymentMethod {
+  CASH_VES
+  CASH_USD
+  CARD
+  TRANSFER
+  MIXED
+}
+
+enum SaleStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+  REFUNDED
+}
+
+// ===== TALLER DE SERVICIOS =====
+model ServiceOrder {
+  id                String               @id @default(cuid())
+  orderNumber       String               @unique
+  customerId        String
+  technicianId      String
+  vehicleType       String
+  vehicleBrand      String?
+  vehicleModel      String?
+  vehicleYear       String?
+  vehiclePlate      String?
+  problemDescription String
+  diagnosis         String?
+  solution          String?
+  laborCost         Decimal              @default(0) @db.Decimal(10, 2)
+  partsCost         Decimal              @default(0) @db.Decimal(10, 2)
+  totalCost         Decimal              @default(0) @db.Decimal(10, 2)
+  status            ServiceOrderStatus   @default(RECEIVED)
+  priority          ServiceOrderPriority @default(NORMAL)
+  estimatedDate     DateTime?
+  completedDate     DateTime?
+  deliveredDate     DateTime?
+  notes             String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  // Relaciones
+  customer    Customer           @relation(fields: [customerId], references: [id])
+  technician  User               @relation(fields: [technicianId], references: [id])
+  serviceItems ServiceOrderItem[]
+
+  @@map("service_orders")
+}
+
+model ServiceOrderItem {
+  id        String  @id @default(cuid())
+  serviceOrderId String
+  productId String
+  quantity  Int
+  unitPrice Decimal @db.Decimal(10, 2)
+  total     Decimal @db.Decimal(10, 2)
+
+  // Relaciones
+  serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  product      Product      @relation(fields: [productId], references: [id])
+
+  @@map("service_order_items")
+}
+
+enum ServiceOrderStatus {
+  RECEIVED
+  IN_PROGRESS
+  WAITING_PARTS
+  COMPLETED
+  DELIVERED
+  CANCELLED
+}
+
+enum ServiceOrderPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+// ===== CONFIGURACIONES DEL SISTEMA =====
+model SystemConfig {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+  description String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("system_config")
+}
