@@ -4,14 +4,16 @@
   "description": "Backend API para BikeShop ERP Enterprise",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "npx tsx watch src/server.ts",
+    "dev:simple": "npx tsx src/simple-server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
-    "db:seed": "tsx src/prisma/seed.ts"
+    "db:seed": "npx tsx src/prisma/seed.ts",
+    "test:api": "node test-api.js"
   },
   "keywords": ["erp", "bikeshop", "api", "enterprise"],
   "author": "BikeShop ERP Team",
