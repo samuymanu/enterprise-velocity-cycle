@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,6 +19,7 @@ export function AddProductModal({ isOpen, onClose, onProductAdded, categories }:
   const [parentCategories, setParentCategories] = useState<any[]>([]);
   const [subCategories, setSubCategories] = useState<any[]>([]);
   const [selectedParentCategory, setSelectedParentCategory] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
   
   // Estado del formulario
   const [newProduct, setNewProduct] = useState({
@@ -32,6 +33,32 @@ export function AddProductModal({ isOpen, onClose, onProductAdded, categories }:
     stock: '',
     minStock: ''
   });
+
+  // Función para subir imagen
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('image', file);
+
+    try {
+      const response = await fetch('http://localhost:3001/api/products/upload-image', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        throw new Error('Error subiendo imagen');
+      }
+
+      const data = await response.json();
+      setImageUrl(data.data.imageUrl);
+    } catch (error) {
+      console.error('Error subiendo imagen:', error);
+      alert('Error al subir la imagen');
+    }
+  };
 
   // Cargar categorías principales cuando se abra el modal
   useEffect(() => {
@@ -79,7 +106,8 @@ export function AddProductModal({ isOpen, onClose, onProductAdded, categories }:
         costPrice: parseFloat(newProduct.costPrice),
         salePrice: parseFloat(newProduct.salePrice),
         stock: parseInt(newProduct.stock),
-        minStock: parseInt(newProduct.minStock)
+        minStock: parseInt(newProduct.minStock),
+        imageUrl: imageUrl || null
       };
 
       await apiService.products.create(productData);
@@ -98,6 +126,7 @@ export function AddProductModal({ isOpen, onClose, onProductAdded, categories }:
       });
       setSelectedParentCategory('');
       setSubCategories([]);
+      setImageUrl('');
       onClose();
       onProductAdded();
       
@@ -114,6 +143,9 @@ export function AddProductModal({ isOpen, onClose, onProductAdded, categories }:
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Agregar Nuevo Producto</DialogTitle>
+          <DialogDescription>
+            Complete la información del producto. El SKU y código de barras se generarán automáticamente.
+          </DialogDescription>
         </DialogHeader>
         
         <div className="bg-primary/10 border border-primary/20 rounded-lg p-4 mb-4">
@@ -124,6 +156,29 @@ export function AddProductModal({ isOpen, onClose, onProductAdded, categories }:
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Campo de imagen */}
+          <div>
+            <Label htmlFor="image">Imagen del Producto</Label>
+            <div className="flex items-center gap-4">
+              <Input
+                id="image"
+                type="file"
+                accept="image/*"
+                onChange={handleImageUpload}
+                className="flex-1"
+              />
+              {imageUrl && (
+                <div className="w-16 h-16 border border-border rounded overflow-hidden">
+                  <img 
+                    src={`http://localhost:3001${imageUrl}`} 
+                    alt="Preview" 
+                    className="w-full h-full object-cover" 
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
           <div>
             <Label htmlFor="name">Nombre del Producto *</Label>
             <Input

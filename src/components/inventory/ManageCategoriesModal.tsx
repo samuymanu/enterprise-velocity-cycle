@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -120,6 +120,9 @@ export function ManageCategoriesModal({ isOpen, onClose, onDataChange }: ManageC
       <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Gestionar Categorías</DialogTitle>
+          <DialogDescription>
+            Cree y administre las categorías principales y subcategorías del inventario.
+          </DialogDescription>
         </DialogHeader>
 
         <Tabs defaultValue="categories" className="w-full">

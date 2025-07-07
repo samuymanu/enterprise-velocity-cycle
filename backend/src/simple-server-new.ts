@@ -310,29 +310,19 @@ app.post('/api/products', async (req: Request, res: Response) => {
 });
 
 // Ruta separada para subir imagen
-app.post('/api/products/upload-image', (req: Request, res: Response) => {
-  upload.single('image')(req, res, (err: any) => {
-    if (err) {
-      console.error('Error en upload:', err);
-      return res.status(400).json({
-        success: false,
-        error: err.message || 'Error subiendo imagen'
-      });
-    }
-
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        error: 'No se subió ninguna imagen'
-      });
-    }
-
-    const imageUrl = `/uploads/${req.file.filename}`;
-    
-    res.json({
-      success: true,
-      data: { imageUrl }
+app.post('/api/products/upload-image', upload.single('image'), (req: Request, res: Response) => {
+  if (!req.file) {
+    return res.status(400).json({
+      success: false,
+      error: 'No se subió ninguna imagen'
     });
+  }
+
+  const imageUrl = `/uploads/${req.file.filename}`;
+  
+  res.json({
+    success: true,
+    data: { imageUrl }
   });
 });
 
@@ -385,22 +375,17 @@ app.put('/api/products/:id', async (req: Request, res: Response) => {
     // Preparar datos para actualización
     const dataToUpdate: any = {};
     
-    if (updateData.sku) dataToUpdate.sku = updateData.sku;
     if (updateData.name) dataToUpdate.name = updateData.name;
     if (updateData.description !== undefined) dataToUpdate.description = updateData.description || null;
     if (updateData.brand !== undefined) dataToUpdate.brand = updateData.brand || null;
-    if (updateData.purchasePrice !== undefined) dataToUpdate.purchasePrice = parseFloat(updateData.purchasePrice) || 0;
-    if (updateData.sellingPrice !== undefined) dataToUpdate.sellingPrice = parseFloat(updateData.sellingPrice);
+    if (updateData.costPrice !== undefined) dataToUpdate.costPrice = parseFloat(updateData.costPrice) || 0;
+    if (updateData.salePrice !== undefined) dataToUpdate.salePrice = parseFloat(updateData.salePrice);
     if (updateData.stock !== undefined) dataToUpdate.stock = parseInt(updateData.stock) || 0;
     if (updateData.minStock !== undefined) dataToUpdate.minStock = parseInt(updateData.minStock) || 10;
     if (updateData.maxStock !== undefined) dataToUpdate.maxStock = updateData.maxStock ? parseInt(updateData.maxStock) : null;
     if (updateData.status) dataToUpdate.status = updateData.status;
     if (updateData.barcode !== undefined) dataToUpdate.barcode = updateData.barcode || null;
-    if (updateData.location !== undefined) dataToUpdate.location = updateData.location || null;
-    if (updateData.weight !== undefined) dataToUpdate.weight = updateData.weight ? parseFloat(updateData.weight) : null;
-    if (updateData.dimensions !== undefined) dataToUpdate.dimensions = updateData.dimensions || null;
-    if (updateData.tags !== undefined) dataToUpdate.tags = Array.isArray(updateData.tags) ? updateData.tags : [updateData.tags];
-    if (updateData.imageUrl !== undefined) dataToUpdate.imageUrl = updateData.imageUrl || null;
+    if (updateData.imageUrl !== undefined) dataToUpdate.images = updateData.imageUrl ? [updateData.imageUrl] : [];
     if (updateData.categoryId !== undefined) dataToUpdate.categoryId = updateData.categoryId || null;
 
     const product = await prisma.product.update({
@@ -471,12 +456,17 @@ app.get('/api/categories', async (req: Request, res: Response) => {
   try {
     const categories = await prisma.category.findMany({
       where: { isActive: true },
+      include: { 
+        parent: true,
+        children: true 
+      },
       orderBy: { name: 'asc' }
     });
 
     res.json({
       success: true,
-      data: categories
+      categories: categories,
+      total: categories.length
     });
   } catch (error: any) {
     console.error('Error obteniendo categorías:', error);
@@ -583,6 +573,55 @@ app.post('/api/categories', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Error creando categoría'
+    });
+  }
+});
+
+// Crear subcategoría
+app.post('/api/categories/subcategory', async (req: Request, res: Response) => {
+  try {
+    const { name, description, parentId } = req.body;
+
+    if (!name || !parentId) {
+      return res.status(400).json({
+        success: false,
+        error: 'El nombre y la categoría padre son requeridos'
+      });
+    }
+
+    // Obtener la categoría padre
+    const parentCategory = await prisma.category.findUnique({
+      where: { id: parentId }
+    });
+
+    if (!parentCategory) {
+      return res.status(400).json({
+        success: false,
+        error: 'Categoría padre no encontrada'
+      });
+    }
+
+    // Crear subcategoría
+    const subcategory = await prisma.category.create({
+      data: {
+        name,
+        description: description || null,
+        code: parentCategory.code, // Heredar el código de la categoría padre
+        parentId: parentId,
+        level: parentCategory.level + 1,
+        path: parentCategory.path ? `${parentCategory.path}/${name}` : name
+      }
+    });
+
+    res.status(201).json({
+      success: true,
+      data: subcategory
+    });
+  } catch (error: any) {
+    console.error('Error creando subcategoría:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error creando subcategoría'
     });
   }
 });
