@@ -139,7 +139,7 @@ router.get('/stats', async (req: any, res: any) => {
         inventoryValue: inventoryValue._sum.costPrice || 0,
         monthlyRevenue: monthlyRevenue._sum.total || 0
       },
-      recentSales: recentSales.map(sale => ({
+      recentSales: recentSales.map((sale: any) => ({
         id: sale.id,
         saleNumber: sale.saleNumber,
         total: sale.total,
@@ -148,7 +148,7 @@ router.get('/stats', async (req: any, res: any) => {
         seller: `${sale.user.firstName} ${sale.user.lastName}`,
         createdAt: sale.createdAt
       })),
-      activeServiceOrders: activeServiceOrders.map(order => ({
+      activeServiceOrders: activeServiceOrders.map((order: any) => ({
         id: order.id,
         orderNumber: order.orderNumber,
         customer: order.customer.companyName || 
@@ -192,7 +192,7 @@ router.get('/sales-chart', async (req: any, res: any) => {
     });
 
     // Agrupar por día
-    const dailySales = salesData.reduce((acc: any, sale) => {
+    const dailySales = salesData.reduce((acc: any, sale: any) => {
       const date = new Date(sale.createdAt).toISOString().split('T')[0];
       if (!acc[date]) {
         acc[date] = {
@@ -201,7 +201,8 @@ router.get('/sales-chart', async (req: any, res: any) => {
           count: 0
         };
       }
-      acc[date].total += Number(sale._sum.total || 0);
+      // Convert Prisma Decimal to number
+      acc[date].total += sale._sum.total ? Number(sale._sum.total) : 0;
       acc[date].count += sale._count.id;
       return acc;
     }, {});

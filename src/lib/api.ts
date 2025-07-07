@@ -27,6 +27,13 @@ const apiRequest = async (endpoint: string, options: RequestInit = {}) => {
       authToken = null;
       throw new Error('Sesión expirada. Por favor, inicia sesión nuevamente.');
     }
+    // Intenta parsear el cuerpo del error para obtener más detalles
+    const errorBody = await response.json().catch(() => null);
+    if (errorBody && errorBody.errors) {
+      const errorMessages = errorBody.errors.map((err: any) => `${err.path.join('.')} - ${err.msg}`).join(', ');
+      throw new Error(`Error de validación: ${errorMessages}`);
+    }
+    
     throw new Error(`Error ${response.status}: ${response.statusText}`);
   }
 
@@ -102,6 +109,43 @@ export const apiService = {
       return apiRequest(`/products/${id}`, {
         method: 'DELETE'
       });
+    },
+    
+    uploadImage: async (file: File) => {
+      const formData = new FormData();
+      formData.append('image', file);
+
+      const response = await fetch(`${API_BASE_URL}/products/upload`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          ...(authToken && { 'Authorization': `Bearer ${authToken}` })
+        }
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => null);
+        if (errorBody && errorBody.error) {
+          throw new Error(`Error al subir la imagen: ${errorBody.error}`);
+        }
+        throw new Error(`Error ${response.status}: ${response.statusText}`);
+      }
+
+      return response.json();
+    }
+  },
+
+  // Marcas
+  brands: {
+    getAll: async () => {
+      return apiRequest('/brands');
+    },
+
+    create: async (name: string) => {
+      return apiRequest('/brands', {
+        method: 'POST',
+        body: JSON.stringify({ name })
+      });
     }
   },
 
@@ -127,26 +171,6 @@ export const apiService = {
 
     delete: async (id: string) => {
       return apiRequest(`/categories/${id}`, {
-        method: 'DELETE'
-      });
-    }
-  },
-
-  // Marcas
-  brands: {
-    getAll: async () => {
-      return apiRequest('/brands');
-    },
-
-    create: async (brandData: any) => {
-      return apiRequest('/brands', {
-        method: 'POST',
-        body: JSON.stringify(brandData)
-      });
-    },
-
-    delete: async (id: string) => {
-      return apiRequest(`/brands/${id}`, {
         method: 'DELETE'
       });
     }

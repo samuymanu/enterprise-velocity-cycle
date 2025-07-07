@@ -7,6 +7,7 @@ import rateLimit from 'express-rate-limit';
 import { Server } from 'socket.io';
 import { createServer } from 'http';
 import dotenv from 'dotenv';
+import path from 'path';
 
 // Importar rutas
 import authRoutes from './routes/auth';
@@ -36,6 +37,9 @@ dotenv.config();
 const app = express();
 const server = createServer(app);
 
+// Servir archivos estáticos desde la carpeta 'uploads'
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
 // Configurar Socket.IO para tiempo real
 const io = new Server(server, {
   cors: {
@@ -60,47 +64,42 @@ const limiter = rateLimit({
 });
 
 // Middleware global
-app.use(helmet()); // Seguridad
 app.use(compression()); // Compresión
 app.use(morgan('combined')); // Logs
-app.use(limiter); // Rate limiting
 
-// CORS configurado
+// CORS debe procesarse antes que otros middlewares como helmet o rate-limiter
+// para asegurar que las cabeceras de CORS se apliquen correctamente a todas las respuestas,
+// incluidas las de pre-flight (OPTIONS).
 app.use(cors({
-  origin: function (origin, callback) {
-    // Permitir requests sin origin (como desde aplicaciones móviles o Postman)
-    if (!origin) return callback(null, true);
-    
-    const allowedOrigins = process.env.CORS_ORIGIN?.split(',') || [
-      'http://localhost:8080',
-      'http://localhost:8081',
-      'http://localhost:8082',
-      'http://localhost:3000',
-      'http://localhost:5173'
-    ];
-    
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    
-    return callback(new Error('No permitido por CORS'), false);
+  origin: (origin, callback) => {
+    // En desarrollo, podríamos ser más permisivos. 
+    // Por ahora, permitimos cualquier origen para desbloquear el desarrollo.
+    callback(null, true);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  exposedHeaders: ['Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+app.use(helmet()); // Seguridad
+app.use(limiter); // Rate limiting
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Manejar preflight requests
+// El manejador de preflight ya no es necesario, cors() lo gestiona
+/*
 app.options('*', (req, res) => {
   res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.sendStatus(200);
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.status(200).send();
+});
+*/
+
+// Rutas de la API
+app.get('/', (req, res) => {
+  res.send('API de BikeShop ERP');
 });
 
 // Rutas públicas (no requieren autenticación)
