@@ -1,21 +1,6 @@
-import express, { Request, Response } from 'express';
+import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import { body, validationResult, query } from 'express-validator';
-import multer from 'multer';
-import path from 'path';
-
-// Configuración de Multer para almacenamiento de imágenes
-const storage = multer.diskStorage({
-  destination: function (req: any, file: any, cb: any) {
-    cb(null, 'uploads/')
-  },
-  filename: function (req: any, file: any, cb: any) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9)
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname))
-  }
-});
-
-const upload = multer({ storage: storage });
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -25,10 +10,10 @@ router.get('/', [
   query('page').optional().isInt({ min: 1 }).withMessage('Página debe ser un número positivo'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Límite debe ser entre 1 y 100'),
   query('search').optional().isString(),
-  query('categoryId').optional().isString(),
-  query('brandId').optional().isString(),
+  query('category').optional().isString(),
+  query('brand').optional().isString(),
   query('status').optional().isIn(['ACTIVE', 'INACTIVE', 'DISCONTINUED'])
-], async (req: Request, res: Response) => {
+], async (req: any, res: any) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -38,12 +23,12 @@ router.get('/', [
       });
     }
 
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
-    const search = (req.query.search as string) || '';
-    const categoryId = req.query.categoryId as string;
-    const brandId = req.query.brandId as string;
-    const status = req.query.status as string;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const search = req.query.search || '';
+    const category = req.query.category;
+    const brand = req.query.brand;
+    const status = req.query.status;
 
     const skip = (page - 1) * limit;
 
@@ -58,19 +43,12 @@ router.get('/', [
       ];
     }
 
-    if (categoryId) {
-      // Primero, encontrar todas las categorías hijas de la categoría seleccionada
-      const childCategories = await prisma.category.findMany({
-        where: { parentId: categoryId },
-        select: { id: true },
-      });
-      const categoryIds = [categoryId, ...childCategories.map(c => c.id)];
-
-      where.categoryId = { in: categoryIds };
+    if (category) {
+      where.category = { name: category };
     }
 
-    if (brandId) {
-      where.brandId = brandId;
+    if (brand) {
+      where.brand = { name: brand };
     }
 
     if (status) {
@@ -82,12 +60,8 @@ router.get('/', [
       prisma.product.findMany({
         where,
         include: {
-          category: {
-            include: {
-              parent: true,
-            },
-          },
-          brand: true,
+          category: true,
+          brand: true
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -114,31 +88,17 @@ router.get('/', [
   }
 });
 
-// Endpoint para subir imágenes de productos
-router.post('/upload', upload.single('image') as any, (req: Request, res: Response) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No se subió ningún archivo.' });
-  }
-  // Construye la URL completa de la imagen
-  const imageUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
-  res.json({ imageUrl });
-});
-
 // Obtener producto por ID
-router.get('/:id', async (req: Request, res: Response) => {
+router.get('/:id', async (req: any, res: any) => {
   try {
     const { id } = req.params;
 
     const product = await prisma.product.findUnique({
       where: { id },
       include: {
-        category: {
-          include: {
-            parent: true,
-          },
-        },
-        brand: true,
-      },
+        category: true,
+        brand: true
+      }
     });
 
     if (!product) {
@@ -167,9 +127,8 @@ router.post('/', [
   body('costPrice').isFloat({ min: 0 }).withMessage('Precio de costo debe ser positivo'),
   body('salePrice').isFloat({ min: 0 }).withMessage('Precio de venta debe ser positivo'),
   body('stock').isInt({ min: 0 }).withMessage('Stock debe ser un número entero positivo'),
-  body('minStock').isInt({ min: 0 }).withMessage('Stock mínimo debe ser un número entero positivo'),
-  body('imageUrl').optional({ checkFalsy: true }).isURL().withMessage('URL de imagen inválida')
-], async (req: Request, res: Response) => {
+  body('minStock').isInt({ min: 0 }).withMessage('Stock mínimo debe ser un número entero positivo')
+], async (req: any, res: any) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -236,11 +195,8 @@ router.put('/:id', [
   body('costPrice').optional().isFloat({ min: 0 }).withMessage('Precio de costo debe ser positivo'),
   body('salePrice').optional().isFloat({ min: 0 }).withMessage('Precio de venta debe ser positivo'),
   body('stock').optional().isInt({ min: 0 }).withMessage('Stock debe ser un número entero positivo'),
-  body('minStock').optional().isInt({ min: 0 }).withMessage('Stock mínimo debe ser un número entero positivo'),
-  body('imageUrl').optional({ checkFalsy: true }).isURL().withMessage('URL de imagen inválida'),
-  body('categoryId').optional().isString().withMessage('El ID de la categoría debe ser un string'),
-  body('brandId').optional().isString().withMessage('El ID de la marca debe ser un string')
-], async (req: Request, res: Response) => {
+  body('minStock').optional().isInt({ min: 0 }).withMessage('Stock mínimo debe ser un número entero positivo')
+], async (req: any, res: any) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -252,20 +208,6 @@ router.put('/:id', [
 
     const { id } = req.params;
     const updateData = req.body;
-
-    // Si se proporciona categoryId o brandId, verificar que existen
-    if (updateData.categoryId) {
-      const category = await prisma.category.findUnique({ where: { id: updateData.categoryId } });
-      if (!category) {
-        return res.status(400).json({ error: 'La categoría especificada no existe' });
-      }
-    }
-    if (updateData.brandId) {
-      const brand = await prisma.brand.findUnique({ where: { id: updateData.brandId } });
-      if (!brand) {
-        return res.status(400).json({ error: 'La marca especificada no existe' });
-      }
-    }
 
     const product = await prisma.product.update({
       where: { id },
@@ -298,7 +240,7 @@ router.put('/:id', [
 });
 
 // Eliminar producto
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', async (req: any, res: any) => {
   try {
     const { id } = req.params;
 
@@ -327,7 +269,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
 });
 
 // Buscar productos por código de barras
-router.get('/barcode/:barcode', async (req: Request, res: Response) => {
+router.get('/barcode/:barcode', async (req: any, res: any) => {
   try {
     const { barcode } = req.params;
 
