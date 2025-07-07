@@ -7,7 +7,18 @@ const prisma = new PrismaClient();
 
 // Middleware básico
 app.use(cors({
-  origin: ['http://localhost:8080', 'http://localhost:3000', 'http://localhost:5173']
+  origin: [
+    'http://localhost:8080',
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'https://id-preview--f484a688-66c2-41f3-9bb8-d163ae469c3c.lovable.app',
+    'https://lovable.app',
+    'https://lovable-api.com'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Authorization']
 }));
 app.use(express.json());
 
@@ -95,21 +106,55 @@ app.get('/api/products', async (req, res) => {
 // Crear producto
 app.post('/api/products', async (req, res) => {
   try {
-    const productData = req.body;
-    
+    const {
+      sku,
+      name,
+      description,
+      brand,
+      costPrice,
+      salePrice,
+      stock,
+      minStock,
+      maxStock,
+      status,
+      barcode,
+      categoryId
+    } = req.body;
+
+    // Validación básica
+    if (!sku || !name || !salePrice) {
+      return res.status(400).json({
+        success: false,
+        error: 'SKU, nombre y precio de venta son requeridos'
+      });
+    }
+
+    // Verificar si ya existe un producto con el mismo SKU
+    const existingProduct = await prisma.product.findUnique({
+      where: { sku }
+    });
+
+    if (existingProduct) {
+      return res.status(400).json({
+        success: false,
+        error: 'Ya existe un producto con este SKU'
+      });
+    }
+
     const product = await prisma.product.create({
       data: {
-        sku: productData.sku,
-        name: productData.name,
-        description: productData.description || '',
-        purchasePrice: productData.purchasePrice ? parseFloat(productData.purchasePrice) : 0,
-        sellingPrice: productData.sellingPrice ? parseFloat(productData.sellingPrice) : 0,
-        stock: parseInt(productData.stock) || 0,
-        minStock: parseInt(productData.minStock) || 0,
-        imageUrl: productData.imageUrl || '',
-        categoryId: productData.categoryId,
-        brand: productData.brand || null,
-        status: 'ACTIVE'
+        sku,
+        name,
+        description: description || null,
+        brand: brand || '',
+        costPrice: costPrice ? parseFloat(costPrice) : 0,
+        salePrice: salePrice ? parseFloat(salePrice) : 0,
+        stock: stock ? parseInt(stock) : 0,
+        minStock: minStock ? parseInt(minStock) : 10,
+        maxStock: maxStock ? parseInt(maxStock) : null,
+        status: status || 'ACTIVE',
+        barcode: barcode || null,
+        categoryId: categoryId || null
       },
       include: {
         category: true
@@ -158,7 +203,7 @@ app.get('/api/brands', async (req, res) => {
   try {
     const brandsFromProducts = await prisma.product.findMany({
       where: { 
-        brand: { not: null },
+        brand: { not: '' },
         status: 'ACTIVE'
       },
       select: { brand: true },
@@ -222,7 +267,7 @@ app.get('/api/dashboard/stats', async (req, res) => {
       // Replace 'stock' with any valid numeric field from your Product model, or remove this aggregation if not needed
       prisma.product.aggregate({
         where: { status: 'ACTIVE' },
-        _sum: { stock: true }
+        _sum: { stock: true, costPrice: true, salePrice: true }
       })
     ]);
 
@@ -233,6 +278,8 @@ app.get('/api/dashboard/stats', async (req, res) => {
         totalCustomers,
         lowStockProducts: 0, // Temporal
         totalInventoryItems: Number(inventoryValue._sum.stock) || 0,
+        inventoryCost: Number(inventoryValue._sum.costPrice) || 0,
+        inventorySale: Number(inventoryValue._sum.salePrice) || 0,
         monthlyRevenue: 0, // Temporal
         totalSales: 0 // Temporal
       }

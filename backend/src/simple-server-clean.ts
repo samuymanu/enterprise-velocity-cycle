@@ -7,7 +7,18 @@ const prisma = new PrismaClient();
 
 // Middleware básico
 app.use(cors({
-  origin: ['http://localhost:8080', 'http://localhost:3000', 'http://localhost:5173']
+  origin: [
+    'http://localhost:8080',
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'https://id-preview--f484a688-66c2-41f3-9bb8-d163ae469c3c.lovable.app',
+    'https://lovable.app',
+    'https://lovable-api.com'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Authorization']
 }));
 app.use(express.json());
 
@@ -88,23 +99,18 @@ app.post('/api/products', async (req, res) => {
       name,
       description,
       brand,
-      purchasePrice,
-      sellingPrice,
+      costPrice,
+      salePrice,
       stock,
       minStock,
       maxStock,
       status,
       barcode,
-      location,
-      weight,
-      dimensions,
-      tags,
-      categoryId,
-      imageUrl
+      categoryId
     } = req.body;
 
     // Validación básica
-    if (!sku || !name || !sellingPrice) {
+    if (!sku || !name || !salePrice) {
       return res.status(400).json({
         success: false,
         error: 'SKU, nombre y precio de venta son requeridos'
@@ -123,37 +129,19 @@ app.post('/api/products', async (req, res) => {
       });
     }
 
-    // Validar imageUrl si se proporciona
-    let validImageUrl = null;
-    if (imageUrl) {
-      if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://') || imageUrl.startsWith('/uploads/')) {
-        validImageUrl = imageUrl;
-      } else {
-        return res.status(400).json({
-          success: false,
-          error: 'La URL de imagen debe ser una URL absoluta o un path válido'
-        });
-      }
-    }
-
     const product = await prisma.product.create({
       data: {
         sku,
         name,
         description: description || null,
-        brand: brand || null,
-        purchasePrice: purchasePrice ? parseFloat(purchasePrice.toString()) : 0,
-        sellingPrice: parseFloat(sellingPrice.toString()),
-        stock: stock ? parseInt(stock.toString()) : 0,
-        minStock: minStock ? parseInt(minStock.toString()) : 10,
-        maxStock: maxStock ? parseInt(maxStock.toString()) : null,
+        brand: brand || '',
+        costPrice: costPrice ? parseFloat(costPrice) : 0,
+        salePrice: salePrice ? parseFloat(salePrice) : 0,
+        stock: stock ? parseInt(stock) : 0,
+        minStock: minStock ? parseInt(minStock) : 10,
+        maxStock: maxStock ? parseInt(maxStock) : null,
         status: status || 'ACTIVE',
         barcode: barcode || null,
-        location: location || null,
-        weight: weight ? parseFloat(weight.toString()) : null,
-        dimensions: dimensions || null,
-        tags: tags ? (Array.isArray(tags) ? tags : [tags]) : [],
-        imageUrl: validImageUrl,
         categoryId: categoryId || null
       },
       include: {
@@ -512,7 +500,7 @@ app.get('/api/brands', async (req, res) => {
   try {
     const brandsFromProducts = await prisma.product.findMany({
       where: { 
-        brand: { not: null },
+        brand: { not: '' },
         status: 'ACTIVE'
       },
       select: { brand: true },
@@ -590,7 +578,7 @@ app.get('/api/dashboard/stats', async (req, res) => {
       }),
       prisma.product.aggregate({
         where: { status: 'ACTIVE' },
-        _sum: { sellingPrice: true }
+        _sum: { stock: true, costPrice: true, salePrice: true }
       })
     ]);
 
@@ -600,7 +588,9 @@ app.get('/api/dashboard/stats', async (req, res) => {
         totalProducts,
         totalCustomers,
         lowStockProducts,
-        inventoryValue: inventoryValue._sum?.sellingPrice || 0,
+        inventoryCost: Number(inventoryValue._sum.costPrice) || 0,
+        inventorySale: Number(inventoryValue._sum.salePrice) || 0,
+        totalInventoryItems: Number(inventoryValue._sum.stock) || 0,
         monthlyRevenue: 0, // Temporal
         totalSales: 0 // Temporal
       }

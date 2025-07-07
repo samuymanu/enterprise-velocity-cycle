@@ -67,24 +67,17 @@ app.use(limiter); // Rate limiting
 
 // CORS configurado
 app.use(cors({
-  origin: function (origin, callback) {
-    // Permitir requests sin origin (como desde aplicaciones móviles o Postman)
-    if (!origin) return callback(null, true);
-    
-    const allowedOrigins = process.env.CORS_ORIGIN?.split(',') || [
-      'http://localhost:8080',
-      'http://localhost:8081',
-      'http://localhost:8082',
-      'http://localhost:3000',
-      'http://localhost:5173'
-    ];
-    
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    
-    return callback(new Error('No permitido por CORS'), false);
-  },
+  origin: [
+    'http://localhost:8080',
+    'http://localhost:8081',
+    'http://localhost:8082',
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'https://id-preview--f484a688-66c2-41f3-9bb8-d163ae469c3c.lovable.app',
+    'https://lovable.app',
+    'https://lovable-api.com',
+    // Agrega aquí otros dominios de Lovable si los usas
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
