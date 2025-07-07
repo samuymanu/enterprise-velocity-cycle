@@ -243,6 +243,7 @@ app.post('/api/products', async (req: Request, res: Response) => {
       });
     }
 
+
     // Obtener la categoría para generar el SKU
     const category = await prisma.category.findUnique({
       where: { id: categoryId },
@@ -256,14 +257,23 @@ app.post('/api/products', async (req: Request, res: Response) => {
       });
     }
 
-    // Determinar el código de categoría (usar el de la categoría padre si es subcategoría)
-    const categoryCode = category.level === 0 ? category.code : category.parent?.code;
-    
-    if (!categoryCode) {
-      return res.status(400).json({
-        success: false,
-        error: 'No se pudo determinar el código de categoría'
-      });
+    // Generar código de 3 letras a partir del nombre de la categoría principal
+    function generateCategoryCode(name: string): string {
+      const cleanName = name.toUpperCase().replace(/[^A-Z]/g, '');
+      if (cleanName.length >= 3) {
+        return cleanName.substring(0, 3);
+      }
+      return (cleanName + 'XXX').substring(0, 3);
+    }
+
+    // Si es subcategoría, usar el nombre de la categoría padre para el código
+    let categoryCode = '';
+    if (category.level === 0) {
+      categoryCode = generateCategoryCode(category.name);
+    } else if (category.parent) {
+      categoryCode = generateCategoryCode(category.parent.name);
+    } else {
+      categoryCode = generateCategoryCode(category.name);
     }
 
     // Generar SKU automáticamente
@@ -514,50 +524,28 @@ app.post('/api/categories', async (req: Request, res: Response) => {
       });
     }
 
+
     // Calcular el nivel y path si hay padre
     let level = 0;
     let path = name;
-    let categoryCode = null;
-    
     if (parentId) {
       const parentCategory = await prisma.category.findUnique({
         where: { id: parentId }
       });
-      
       if (!parentCategory) {
         return res.status(400).json({
           success: false,
           error: 'Categoría padre no encontrada'
         });
       }
-      
       level = parentCategory.level + 1;
       path = parentCategory.path ? `${parentCategory.path}/${name}` : name;
-      // Las subcategorías heredan el código de la categoría padre
-      categoryCode = parentCategory.code;
-    } else {
-      // Solo las categorías principales (level 0) generan código
-      categoryCode = generateCategoryCode(name);
-      
-      // Verificar que el código no exista
-      let counter = 0;
-      let finalCode = categoryCode;
-      while (counter < 100) {
-        const existing = await prisma.category.findFirst({
-          where: { code: finalCode, level: 0 }
-        });
-        if (!existing) break;
-        counter++;
-        finalCode = categoryCode.substring(0, 2) + counter.toString().padStart(1, '0');
-      }
-      categoryCode = finalCode;
     }
 
     const category = await prisma.category.create({
       data: {
         name,
         description: description || null,
-        code: categoryCode,
         parentId: parentId || null,
         level,
         path
@@ -606,7 +594,6 @@ app.post('/api/categories/subcategory', async (req: Request, res: Response) => {
       data: {
         name,
         description: description || null,
-        code: parentCategory.code, // Heredar el código de la categoría padre
         parentId: parentId,
         level: parentCategory.level + 1,
         path: parentCategory.path ? `${parentCategory.path}/${name}` : name
