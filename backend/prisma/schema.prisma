@@ -78,6 +78,7 @@ model Category {
   id          String    @id @default(cuid())
   name        String    
   description String?
+  code        String?   // Código de 3 letras para generación de SKU (ej: BIC, MOT, ACC)
   isActive    Boolean   @default(true)
   
   // Jerarquía de categorías

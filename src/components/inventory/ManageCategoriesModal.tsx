@@ -24,6 +24,7 @@ export function ManageCategoriesModal({ isOpen, onClose, onDataChange }: ManageC
   // Estado para crear categoría principal
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newCategoryDescription, setNewCategoryDescription] = useState('');
+  const [newCategoryCode, setNewCategoryCode] = useState('');
   const [creatingCategory, setCreatingCategory] = useState(false);
   
   // Estado para crear subcategoría
@@ -63,6 +64,7 @@ export function ManageCategoriesModal({ isOpen, onClose, onDataChange }: ManageC
       
       setNewCategoryName('');
       setNewCategoryDescription('');
+      setNewCategoryCode('');
       await loadData();
       onDataChange();
     } catch (error: any) {
@@ -135,14 +137,20 @@ export function ManageCategoriesModal({ isOpen, onClose, onDataChange }: ManageC
                 </CardTitle>
               </CardHeader>
               <CardContent>
+                <div className="bg-info/10 border border-info/20 rounded-lg p-4 mb-4">
+                  <p className="text-sm text-info-foreground">
+                    <strong>🔧 Códigos Automáticos:</strong> Se generará automáticamente un código de 3 letras 
+                    para generar SKUs (ej: Bicicletas → BIC, Motocicletas → MOT).
+                  </p>
+                </div>
                 <form onSubmit={handleCreateCategory} className="space-y-4">
                   <div>
-                    <Label htmlFor="categoryName">Nombre</Label>
+                    <Label htmlFor="categoryName">Nombre de Categoría *</Label>
                     <Input
                       id="categoryName"
                       value={newCategoryName}
                       onChange={(e) => setNewCategoryName(e.target.value)}
-                      placeholder="Ej: Bicicletas"
+                      placeholder="Ej: Bicicletas, Motocicletas, Accesorios"
                       required
                     />
                   </div>
@@ -230,7 +238,14 @@ export function ManageCategoriesModal({ isOpen, onClose, onDataChange }: ManageC
                       <div key={category.id} className="border rounded-lg p-4">
                         <div className="flex items-center justify-between mb-2">
                           <div>
-                            <h4 className="font-semibold">{category.name}</h4>
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-semibold">{category.name}</h4>
+                              {category.code && (
+                                <Badge variant="secondary" className="text-xs">
+                                  Código: {category.code}
+                                </Badge>
+                              )}
+                            </div>
                             {category.description && (
                               <p className="text-sm text-muted-foreground">{category.description}</p>
                             )}

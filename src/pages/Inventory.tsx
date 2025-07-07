@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ManageCategoriesModal } from "@/components/inventory/ManageCategoriesModal";
+import { AddProductModal } from "@/components/inventory/AddProductModal";
 import { apiService } from "@/lib/api";
 import { useState, useEffect } from "react";
 import { Settings, Plus, RefreshCw } from "lucide-react";
@@ -19,33 +20,10 @@ export default function Inventory() {
   const [error, setError] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   
-  // Estado para el modal de nuevo producto
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [categories, setCategories] = useState<any[]>([]);
-  
-  // Estado para el modal de gestión
+  // Estado para modales
+  const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
   const [isManageModalOpen, setIsManageModalOpen] = useState(false);
-  
-  // Estado para categorías jerárquicas
-  const [parentCategories, setParentCategories] = useState<any[]>([]);
-  const [subCategories, setSubCategories] = useState<any[]>([]);
-  const [selectedParentCategory, setSelectedParentCategory] = useState('');
-  
-  // Estado del formulario de nuevo producto
-  const [newProduct, setNewProduct] = useState({
-    sku: '',
-    name: '',
-    description: '',
-    parentCategoryId: '',
-    subCategoryId: '',
-    brand: '',
-    costPrice: '',
-    salePrice: '',
-    stock: '',
-    minStock: '',
-    barcode: ''
-  });
+  const [categories, setCategories] = useState<any[]>([]);
 
   // Función para hacer login automático (temporal para desarrollo)
   const autoLogin = async () => {
@@ -87,90 +65,15 @@ export default function Inventory() {
   const loadCategories = async () => {
     try {
       const data = await apiService.categories.getAll();
-      const allCategories = data.categories || [];
-      
-      // Separar categorías principales (nivel 0) y subcategorías (nivel 1+)
-      const mainCategories = allCategories.filter((cat: any) => cat.level === 0 || !cat.parentId);
-      
-      setCategories(allCategories);
-      setParentCategories(mainCategories);
+      setCategories(data.categories || []);
     } catch (error) {
       console.error('Error cargando categorías:', error);
     }
   };
 
-  // Función para cargar subcategorías cuando se selecciona una categoría principal
-  const handleParentCategoryChange = (parentId: string) => {
-    setSelectedParentCategory(parentId);
-    
-    // Filtrar subcategorías de la categoría principal seleccionada
-    const filteredSubCategories = categories.filter((cat: any) => cat.parentId === parentId);
-    setSubCategories(filteredSubCategories);
-    
-    // Resetear subcategoría seleccionada
-    setNewProduct(prev => ({
-      ...prev,
-      parentCategoryId: parentId,
-      subCategoryId: ''
-    }));
-  };
-
-  // Función para manejar envío del formulario
-  const handleSubmitNewProduct = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSubmitting(true);
-
-    try {
-      // Determinar la categoría final (subcategoría si existe, sino la principal)
-      const finalCategoryId = newProduct.subCategoryId || newProduct.parentCategoryId;
-      
-      if (!finalCategoryId) {
-        alert('Por favor selecciona una categoría');
-        return;
-      }
-
-      const productData = {
-        sku: newProduct.sku,
-        name: newProduct.name,
-        description: newProduct.description,
-        categoryId: finalCategoryId,
-        brand: newProduct.brand,
-        costPrice: parseFloat(newProduct.costPrice),
-        salePrice: parseFloat(newProduct.salePrice),
-        stock: parseInt(newProduct.stock),
-        minStock: parseInt(newProduct.minStock),
-        barcode: newProduct.barcode
-      };
-
-      await apiService.products.create(productData);
-      
-      // Resetear formulario y cerrar modal
-      setNewProduct({
-        sku: '',
-        name: '',
-        description: '',
-        parentCategoryId: '',
-        subCategoryId: '',
-        brand: '',
-        costPrice: '',
-        salePrice: '',
-        stock: '',
-        minStock: '',
-        barcode: ''
-      });
-      setSelectedParentCategory('');
-      setSubCategories([]);
-      setIsModalOpen(false);
-      
-      // Recargar productos (usar refresh para no mostrar loading completo)
-      await loadProducts(true);
-      
-    } catch (error: any) {
-      console.error('Error creando producto:', error);
-      alert('Error al crear producto: ' + (error.message || 'Error desconocido'));
-    } finally {
-      setIsSubmitting(false);
-    }
+  // Función para manejar cuando se agrega un producto
+  const handleProductAdded = async () => {
+    await loadProducts(true);
   };
 
   // Efecto para cargar datos al montar el componente
@@ -257,182 +160,14 @@ export default function Inventory() {
               <RefreshCw className={`h-4 w-4 ${refreshingProducts ? 'animate-spin' : ''}`} />
               Actualizar
             </Button>
-            <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" className="bg-primary hover:bg-primary-hover flex items-center gap-2">
-                  <Plus className="h-4 w-4" />
-                  Nuevo Producto
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>Agregar Nuevo Producto</DialogTitle>
-                </DialogHeader>
-                <form onSubmit={handleSubmitNewProduct} className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="sku">SKU *</Label>
-                      <Input
-                        id="sku"
-                        value={newProduct.sku}
-                        onChange={(e) => setNewProduct({...newProduct, sku: e.target.value})}
-                        placeholder="Ej: BIC-001"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="barcode">Código de Barras</Label>
-                      <Input
-                        id="barcode"
-                        value={newProduct.barcode}
-                        onChange={(e) => setNewProduct({...newProduct, barcode: e.target.value})}
-                        placeholder="Código de barras"
-                      />
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <Label htmlFor="name">Nombre del Producto *</Label>
-                    <Input
-                      id="name"
-                      value={newProduct.name}
-                      onChange={(e) => setNewProduct({...newProduct, name: e.target.value})}
-                      placeholder="Nombre del producto"
-                      required
-                    />
-                  </div>
-                  
-                  <div>
-                    <Label htmlFor="description">Descripción</Label>
-                    <Textarea
-                      id="description"
-                      value={newProduct.description}
-                      onChange={(e) => setNewProduct({...newProduct, description: e.target.value})}
-                      placeholder="Descripción del producto"
-                      rows={3}
-                    />
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="parentCategory">Categoría Principal *</Label>
-                      <Select value={newProduct.parentCategoryId} onValueChange={handleParentCategoryChange}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Seleccionar categoría principal" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {parentCategories.map((category) => (
-                            <SelectItem key={category.id} value={category.id}>
-                              {category.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label htmlFor="subCategory">Subcategoría</Label>
-                      <Select 
-                        value={newProduct.subCategoryId} 
-                        onValueChange={(value) => setNewProduct({...newProduct, subCategoryId: value})}
-                        disabled={!selectedParentCategory}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder={
-                            !selectedParentCategory 
-                              ? "Primero selecciona categoría principal" 
-                              : subCategories.length === 0
-                                ? "No hay subcategorías disponibles"
-                                : "Seleccionar subcategoría"
-                          } />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {subCategories.map((category) => (
-                            <SelectItem key={category.id} value={category.id}>
-                              {category.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-gray-500 mt-1">
-                        Opcional: Si no seleccionas subcategoría, se usará la categoría principal
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <Label htmlFor="brand">Marca *</Label>
-                    <Input
-                      id="brand"
-                      value={newProduct.brand}
-                      onChange={(e) => setNewProduct({...newProduct, brand: e.target.value})}
-                      placeholder="Ej: Trek, Honda, Bell, etc."
-                      required
-                    />
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="costPrice">Precio de Costo *</Label>
-                      <Input
-                        id="costPrice"
-                        type="number"
-                        step="0.01"
-                        value={newProduct.costPrice}
-                        onChange={(e) => setNewProduct({...newProduct, costPrice: e.target.value})}
-                        placeholder="0.00"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="salePrice">Precio de Venta *</Label>
-                      <Input
-                        id="salePrice"
-                        type="number"
-                        step="0.01"
-                        value={newProduct.salePrice}
-                        onChange={(e) => setNewProduct({...newProduct, salePrice: e.target.value})}
-                        placeholder="0.00"
-                        required
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="stock">Stock Inicial *</Label>
-                      <Input
-                        id="stock"
-                        type="number"
-                        value={newProduct.stock}
-                        onChange={(e) => setNewProduct({...newProduct, stock: e.target.value})}
-                        placeholder="0"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="minStock">Stock Mínimo *</Label>
-                      <Input
-                        id="minStock"
-                        type="number"
-                        value={newProduct.minStock}
-                        onChange={(e) => setNewProduct({...newProduct, minStock: e.target.value})}
-                        placeholder="0"
-                        required
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="flex justify-end gap-2 pt-4">
-                    <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>
-                      Cancelar
-                    </Button>
-                    <Button type="submit" disabled={isSubmitting}>
-                      {isSubmitting ? 'Creando...' : 'Crear Producto'}
-                    </Button>
-                  </div>
-                </form>
-              </DialogContent>
-            </Dialog>
+            <Button 
+              size="sm" 
+              className="bg-primary hover:bg-primary-hover flex items-center gap-2"
+              onClick={() => setIsAddProductModalOpen(true)}
+            >
+              <Plus className="h-4 w-4" />
+              Nuevo Producto
+            </Button>
           </div>
         </div>
 
@@ -615,14 +350,19 @@ export default function Inventory() {
         </div>
       </div>
 
-      {/* Modal de Gestión de Categorías */}
-      <ManageCategoriesModal 
-        isOpen={isManageModalOpen}
-        onClose={() => setIsManageModalOpen(false)}
-        onDataChange={() => {
-          loadCategories();
-        }}
-      />
+        {/* Modales */}
+        <ManageCategoriesModal 
+          isOpen={isManageModalOpen}
+          onClose={() => setIsManageModalOpen(false)}
+          onDataChange={loadCategories}
+        />
+        
+        <AddProductModal 
+          isOpen={isAddProductModalOpen}
+          onClose={() => setIsAddProductModalOpen(false)}
+          onProductAdded={handleProductAdded}
+          categories={categories}
+        />
     </AppLayout>
   );
 }
