@@ -20,13 +20,60 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// ===== AUTH ENDPOINTS (MOCK) =====
+
+// Login mock (sin autenticación real)
+app.post('/api/auth/login', (req, res) => {
+  const { email, password } = req.body;
+  
+  // Mock response - siempre permite el login
+  res.json({
+    success: true,
+    data: {
+      user: {
+        id: '1',
+        email: email || 'admin@bikeshop.com',
+        name: 'Administrador',
+        role: 'ADMIN'
+      },
+      token: 'mock-jwt-token'
+    },
+    message: 'Login exitoso'
+  });
+});
+
+// Verificar token (mock)
+app.get('/api/auth/verify', (req, res) => {
+  // Mock response - siempre válido
+  res.json({
+    success: true,
+    data: {
+      user: {
+        id: '1',
+        email: 'admin@bikeshop.com',
+        name: 'Administrador',
+        role: 'ADMIN'
+      }
+    }
+  });
+});
+
+// Logout (mock)
+app.post('/api/auth/logout', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Logout exitoso'
+  });
+});
+
+// ===== PRODUCTOS =====
+
 // Obtener productos
 app.get('/api/products', async (req, res) => {
   try {
     const products = await prisma.product.findMany({
       include: {
-        category: true,
-        brand: true
+        category: true
       },
       orderBy: { createdAt: 'desc' }
     });
@@ -35,11 +82,51 @@ app.get('/api/products', async (req, res) => {
       success: true,
       data: products
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error obteniendo productos:', error);
     res.status(500).json({
       success: false,
-      error: 'Error obteniendo productos'
+      error: 'Error obteniendo productos',
+      details: error.message
+    });
+  }
+});
+
+// Crear producto
+app.post('/api/products', async (req, res) => {
+  try {
+    const productData = req.body;
+    
+    const product = await prisma.product.create({
+      data: {
+        sku: productData.sku,
+        name: productData.name,
+        description: productData.description || '',
+        purchasePrice: productData.purchasePrice ? parseFloat(productData.purchasePrice) : 0,
+        sellingPrice: productData.sellingPrice ? parseFloat(productData.sellingPrice) : 0,
+        stock: parseInt(productData.stock) || 0,
+        minStock: parseInt(productData.minStock) || 0,
+        imageUrl: productData.imageUrl || '',
+        categoryId: productData.categoryId,
+        brand: productData.brand || null,
+        status: 'ACTIVE'
+      },
+      include: {
+        category: true
+      }
+    });
+
+    res.status(201).json({
+      success: true,
+      data: product,
+      message: 'Producto creado exitosamente'
+    });
+  } catch (error: any) {
+    console.error('Error creando producto:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error creando producto',
+      details: error.message
     });
   }
 });
@@ -56,32 +143,46 @@ app.get('/api/categories', async (req, res) => {
       success: true,
       data: categories
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error obteniendo categorías:', error);
     res.status(500).json({
       success: false,
-      error: 'Error obteniendo categorías'
+      error: 'Error obteniendo categorías',
+      details: error.message
     });
   }
 });
 
-// Obtener marcas
+// Obtener marcas (desde productos existentes)
 app.get('/api/brands', async (req, res) => {
   try {
-    const brands = await prisma.brand.findMany({
-      where: { isActive: true },
-      orderBy: { name: 'asc' }
+    const brandsFromProducts = await prisma.product.findMany({
+      where: { 
+        brand: { not: null },
+        status: 'ACTIVE'
+      },
+      select: { brand: true },
+      distinct: ['brand']
     });
+
+    const brands = brandsFromProducts
+      .filter(item => item.brand)
+      .map((item, index) => ({
+        id: `brand-${index + 1}`,
+        name: item.brand!,
+        isActive: true
+      }));
 
     res.json({
       success: true,
       data: brands
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error obteniendo marcas:', error);
     res.status(500).json({
       success: false,
-      error: 'Error obteniendo marcas'
+      error: 'Error obteniendo marcas',
+      details: error.message
     });
   }
 });
@@ -98,41 +199,30 @@ app.get('/api/customers', async (req, res) => {
       success: true,
       data: customers
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error obteniendo clientes:', error);
     res.status(500).json({
       success: false,
-      error: 'Error obteniendo clientes'
+      error: 'Error obteniendo clientes',
+      details: error.message
     });
   }
 });
 
-// Estadísticas del dashboard
+// Estadísticas del dashboard simplificadas
 app.get('/api/dashboard/stats', async (req, res) => {
   try {
     const [
       totalProducts,
       totalCustomers,
-      lowStockProducts,
       inventoryValue
     ] = await Promise.all([
       prisma.product.count({ where: { status: 'ACTIVE' } }),
       prisma.customer.count({ where: { isActive: true } }),
-      prisma.product.count({
-        where: {
-          AND: [
-            { status: 'ACTIVE' },
-            {
-              stock: {
-                lte: prisma.product.fields.minStock
-              }
-            }
-          ]
-        }
-      }),
+      // Replace 'stock' with any valid numeric field from your Product model, or remove this aggregation if not needed
       prisma.product.aggregate({
         where: { status: 'ACTIVE' },
-        _sum: { costPrice: true }
+        _sum: { stock: true }
       })
     ]);
 
@@ -141,17 +231,18 @@ app.get('/api/dashboard/stats', async (req, res) => {
       data: {
         totalProducts,
         totalCustomers,
-        lowStockProducts,
-        inventoryValue: inventoryValue._sum.costPrice || 0,
+        lowStockProducts: 0, // Temporal
+        totalInventoryItems: Number(inventoryValue._sum.stock) || 0,
         monthlyRevenue: 0, // Temporal
         totalSales: 0 // Temporal
       }
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error obteniendo estadísticas:', error);
     res.status(500).json({
       success: false,
-      error: 'Error obteniendo estadísticas'
+      error: 'Error obteniendo estadísticas',
+      details: error.message
     });
   }
 });

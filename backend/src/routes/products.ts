@@ -48,7 +48,7 @@ router.get('/', [
     }
 
     if (brand) {
-      where.brand = { name: brand };
+      where.brand = { contains: brand, mode: 'insensitive' };
     }
 
     if (status) {
@@ -60,8 +60,7 @@ router.get('/', [
       prisma.product.findMany({
         where,
         include: {
-          category: true,
-          brand: true
+          category: true
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -96,8 +95,7 @@ router.get('/:id', async (req: any, res: any) => {
     const product = await prisma.product.findUnique({
       where: { id },
       include: {
-        category: true,
-        brand: true
+        category: true
       }
     });
 
@@ -140,11 +138,10 @@ router.post('/', [
 
     const productData = req.body;
 
-    // Verificar que la categoría y marca existen
-    const [category, brand] = await Promise.all([
-      prisma.category.findUnique({ where: { id: productData.categoryId } }),
-      prisma.brand.findUnique({ where: { id: productData.brandId } })
-    ]);
+    // Verificar que la categoría existe
+    const category = await prisma.category.findUnique({ 
+      where: { id: productData.categoryId } 
+    });
 
     if (!category) {
       return res.status(400).json({
@@ -153,18 +150,10 @@ router.post('/', [
       });
     }
 
-    if (!brand) {
-      return res.status(400).json({
-        error: 'Marca inválida',
-        message: 'La marca especificada no existe'
-      });
-    }
-
     const product = await prisma.product.create({
       data: productData,
       include: {
-        category: true,
-        brand: true
+        category: true
       }
     });
 
@@ -213,8 +202,7 @@ router.put('/:id', [
       where: { id },
       data: updateData,
       include: {
-        category: true,
-        brand: true
+        category: true
       }
     });
 
@@ -273,11 +261,10 @@ router.get('/barcode/:barcode', async (req: any, res: any) => {
   try {
     const { barcode } = req.params;
 
-    const product = await prisma.product.findUnique({
-      where: { barcode },
+    const product = await prisma.product.findFirst({
+      where: { barcode: barcode },
       include: {
-        category: true,
-        brand: true
+        category: true
       }
     });
 

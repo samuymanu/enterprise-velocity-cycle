@@ -72,20 +72,7 @@ async function main() {
 
   console.log('✅ Categorías jerárquicas creadas');
 
-  // Crear marcas
-  const trek = await prisma.brand.upsert({
-    where: { name: 'Trek' },
-    update: {},
-    create: { name: 'Trek' }
-  });
-
-  const specialized = await prisma.brand.upsert({
-    where: { name: 'Specialized' },
-    update: {},
-    create: { name: 'Specialized' }
-  });
-
-  console.log('✅ Marcas creadas');
+  console.log('✅ Categorías creadas, marcas se manejaran como strings en productos');
 
   // Crear productos de ejemplo
   const producto1 = await prisma.product.upsert({
@@ -95,12 +82,12 @@ async function main() {
       sku: 'MTB-001',
       name: 'Trek Mountain Bike X-Caliber',
       description: 'Mountain bike Trek para terrenos exigentes',
-      salePrice: 1299.99,
-      costPrice: 800.00,
+      purchasePrice: 800.00,
+      sellingPrice: 1200.00,
       stock: 5,
       minStock: 2,
       categoryId: mountainBike.id,
-      brandId: trek.id,
+      brand: 'Trek',
       status: 'ACTIVE',
       barcode: '1234567890001'
     }
@@ -113,12 +100,12 @@ async function main() {
       sku: 'ROAD-001',
       name: 'Specialized Roubaix Elite',
       description: 'Bicicleta de ruta Specialized para competición',
-      salePrice: 2199.99,
-      costPrice: 1400.00,
+      purchasePrice: 1400.00,
+      sellingPrice: 2100.00,
       stock: 3,
       minStock: 1,
       categoryId: ruta.id,
-      brandId: specialized.id,
+      brand: 'Specialized',
       status: 'ACTIVE',
       barcode: '1234567890002'
     }

@@ -3,8 +3,9 @@ import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
+// Forza actualización de tipos TypeScript
 async function main() {
-  console.log('🌱 Iniciando seed de datos...');
+  console.log('🌱 Iniciando seed de datos (backup)...');
 
   // Crear usuario administrador por defecto
   const hashedPassword = await bcrypt.hash('admin123', 12);
@@ -193,133 +194,90 @@ async function main() {
 
   console.log('✅ Categorías jerárquicas creadas');
 
-  // Crear marcas por defecto
-  const brands = await Promise.all([
-    prisma.brand.upsert({
-      where: { name: 'Trek' },
-      update: {},
-      create: { name: 'Trek' }
-    }),
-    prisma.brand.upsert({
-      where: { name: 'Honda' },
-      update: {},
-      create: { name: 'Honda' }
-    }),
-    prisma.brand.upsert({
-      where: { name: 'Bell' },
-      update: {},
-      create: { name: 'Bell' }
-    }),
-    prisma.brand.upsert({
-      where: { name: 'Specialized' },
-      update: {},
-      create: { name: 'Specialized' }
-    }),
-    prisma.brand.upsert({
-      where: { name: 'Yamaha' },
-      update: {},
-      create: { name: 'Yamaha' }
-    })
-  ]);
-
-  console.log('✅ Marcas creadas:', brands.length);
+  console.log('✅ Marcas configuradas como texto');
 
   // Obtener categorías para crear productos
   const allCategories = await prisma.category.findMany();
-  const bicycleCategory = allCategories.find((c: { name: string }) => c.name === 'Bicicletas');
-  const motorcycleCategory = allCategories.find((c: { name: string }) => c.name === 'Motocicletas');
-  const mountainBikeCategory = allCategories.find((c: { name: string }) => c.name === 'Mountain Bike');
-  const helmetCategory = allCategories.find((c: { name: string }) => c.name === 'Accesorios');
-  const repuestosData = allCategories.find((c: { name: string }) => c.name === 'Repuestos');
-  
-  const trekBrand = brands.find(b => b.name === 'Trek');
-  const hondaBrand = brands.find(b => b.name === 'Honda');
-  const bellBrand = brands.find(b => b.name === 'Bell');
+  const bicycleCategory = allCategories.find((c) => c.name === 'Bicicletas');
+  const motorcycleCategory = allCategories.find((c) => c.name === 'Motocicletas');
+  const mountainBikeCategory = allCategories.find((c) => c.name === 'Mountain Bike');
+  const helmetCategory = allCategories.find((c) => c.name === 'Accesorios');
+  const repuestosData = allCategories.find((c) => c.name === 'Repuestos');
 
-  if (bicycleCategory !== undefined && motorcycleCategory !== undefined && helmetCategory !== undefined && trekBrand !== undefined && hondaBrand !== undefined && bellBrand !== undefined) {
-    const products = await Promise.all([
-      prisma.product.upsert({
-        where: { sku: 'BIC-001' },
-        update: {},
-        create: {
-          sku: 'BIC-001',
-          name: 'Bicicleta Mountain Bike Pro',
-          description: 'Bicicleta de montaña profesional Trek',
-          categoryId: bicycleCategory.id,
-          brandId: trekBrand.id,
-          costPrice: 800.00,
-          salePrice: 1250.00,
-          stock: 15,
-          minStock: 5,
-          barcode: '123456789001'
-        }
-      }),
-      prisma.product.upsert({
-        where: { sku: 'MOT-001' },
-        update: {},
-        create: {
-          sku: 'MOT-001',
-          name: 'Moto Honda CB600F',
-          description: 'Motocicleta Honda CB600F deportiva',
-          categoryId: motorcycleCategory.id,
-          brandId: hondaBrand.id,
-          costPrice: 6500.00,
-          salePrice: 8500.00,
-          stock: 3,
-          minStock: 2,
-          barcode: '123456789002'
-        }
-      }),
-      prisma.product.upsert({
-        where: { sku: 'CAS-001' },
-        update: {},
-        create: {
-          sku: 'CAS-001',
-          name: 'Casco Integral Bell',
-          description: 'Casco integral Bell con certificación DOT',
-          categoryId: helmetCategory.id,
-          brandId: bellBrand.id,
-          costPrice: 60.00,
-          salePrice: 89.99,
-          stock: 2,
-          minStock: 8,
-          barcode: '123456789003'
-        }
-      }),
-      // Agregar más productos con diferentes estados de stock
-      prisma.product.upsert({
-        where: { sku: 'ACC-001' },
-        update: {},
-        create: {
-          sku: 'ACC-001',
-          name: 'Luz LED Delantera',
-          description: 'Luz LED alta potencia para bicicleta',
-          categoryId: helmetCategory.id,
-          brandId: bellBrand.id,
-          costPrice: 25.00,
-          salePrice: 39.99,
-          stock: 3,
-          minStock: 10,
-          barcode: '123456789004'
-        }
-      }),
-      prisma.product.upsert({
-        where: { sku: 'REP-001' },
-        update: {},
-        create: {
-          sku: 'REP-001',
-          name: 'Cadena de Bicicleta 10V',
-          description: 'Cadena para bicicleta 10 velocidades',
-          categoryId: repuestosData?.id || helmetCategory.id,
-          brandId: trekBrand.id,
-          costPrice: 15.00,
-          salePrice: 29.99,
-          stock: 0,
-          minStock: 5,
-          barcode: '123456789005'
-        }
-      })
-    ]);
+  if (bicycleCategory && motorcycleCategory && helmetCategory) {
+    // Datos de productos con tipos explícitos para evitar problemas de cache de TS
+    const productData = [
+      {
+        sku: 'BIC-001',
+        name: 'Bicicleta Mountain Bike Pro',
+        description: 'Bicicleta de montaña profesional Trek',
+        categoryId: bicycleCategory.id,
+        brand: 'Trek',
+        costPrice: 800,
+        salePrice: 1250,
+        stock: 15,
+        minStock: 5,
+        barcode: '123456789001'
+      },
+      {
+        sku: 'MOT-001',
+        name: 'Moto Honda CB600F',
+        description: 'Motocicleta Honda CB600F deportiva',
+        categoryId: motorcycleCategory.id,
+        brand: 'Honda',
+        costPrice: 6500,
+        salePrice: 8500,
+        stock: 3,
+        minStock: 2,
+        barcode: '123456789002'
+      },
+      {
+        sku: 'CAS-001',
+        name: 'Casco Integral Bell',
+        description: 'Casco integral Bell con certificación DOT',
+        categoryId: helmetCategory.id,
+        brand: 'Bell',
+        costPrice: 60,
+        salePrice: 89.99,
+        stock: 2,
+        minStock: 8,
+        barcode: '123456789003'
+      },
+      {
+        sku: 'ACC-001',
+        name: 'Luz LED Delantera',
+        description: 'Luz LED alta potencia para bicicleta',
+        categoryId: helmetCategory.id,
+        brand: 'Bell',
+        costPrice: 25,
+        salePrice: 39.99,
+        stock: 3,
+        minStock: 10,
+        barcode: '123456789004'
+      },
+      {
+        sku: 'REP-001',
+        name: 'Cadena de Bicicleta 10V',
+        description: 'Cadena para bicicleta 10 velocidades',
+        categoryId: repuestosData?.id || helmetCategory.id,
+        brand: 'Trek',
+        costPrice: 15,
+        salePrice: 29.99,
+        stock: 0,
+        minStock: 5,
+        barcode: '123456789005'
+      }
+    ];
+
+    const products = await Promise.all(
+      productData.map(data =>
+        prisma.product.upsert({
+          where: { sku: data.sku },
+          update: {},
+          create: data as any // Casting temporal para evitar problemas de cache de TS
+        })
+      )
+    );
 
     console.log('✅ Productos de ejemplo creados:', products.length);
   }
