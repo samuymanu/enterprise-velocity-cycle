@@ -122,6 +122,7 @@ model Category {
   parent      Category? @relation("CategoryHierarchy", fields: [parentId], references: [id])
   children    Category[] @relation("CategoryHierarchy")
   products    Product[]
+  categoryAttributes CategoryAttribute[]
 
   // Índices para optimizar consultas jerárquicas
   @@index([parentId])
@@ -157,6 +158,7 @@ model Product {
   saleItems   SaleItem[]
   inventoryMoves InventoryMove[]
   serviceOrderItems ServiceOrderItem[]
+  attributeValues ProductAttributeValue[]
 
   @@map("products")
 }
@@ -308,6 +310,65 @@ enum ServiceOrderPriority {
   NORMAL
   HIGH
   URGENT
+}
+
+// ===== SISTEMA DE ATRIBUTOS DINÁMICOS =====
+model Attribute {
+  id          String      @id @default(cuid())
+  name        String      @unique // ej: "Tamaño de rueda", "Color", "Material"
+  type        AttributeType
+  unit        String?     // opcional, ej: "cm", "kg"
+  options     String[]    // array de strings, solo si type = LIST
+  description String?
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Relaciones
+  categoryAttributes CategoryAttribute[]
+  productValues      ProductAttributeValue[]
+
+  @@map("attributes")
+}
+
+enum AttributeType {
+  STRING
+  NUMBER
+  BOOLEAN
+  LIST
+  DATE
+}
+
+model CategoryAttribute {
+  id          String   @id @default(cuid())
+  categoryId  String
+  attributeId String
+  isRequired  Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  // Relaciones
+  category  Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  attribute Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryId, attributeId])
+  @@map("category_attributes")
+}
+
+model ProductAttributeValue {
+  id          String   @id @default(cuid())
+  productId   String
+  attributeId String
+  value       String   // Almacenamos todo como string y convertimos según el tipo
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relaciones
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  attribute Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, attributeId])
+  @@map("product_attribute_values")
 }
 
 // ===== CONFIGURACIONES DEL SISTEMA =====
