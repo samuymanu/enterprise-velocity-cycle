@@ -9,9 +9,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { ManageCategoriesModal } from "@/components/inventory/ManageCategoriesModal";
 import { AddProductModal } from "@/components/inventory/AddProductModal";
+import { EditProductModal } from "@/components/inventory/EditProductModal"; // Importar el nuevo modal
 import { apiService } from "@/lib/api";
 import { useState, useEffect } from "react";
-import { Settings, Plus, RefreshCw } from "lucide-react";
+import { Settings, Plus, RefreshCw, FilePenLine, Barcode, Download, FileText } from "lucide-react";
 
 export default function Inventory() {
   const [products, setProducts] = useState<any[]>([]);
@@ -23,6 +24,8 @@ export default function Inventory() {
   // Estado para modales
   const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
   const [isManageModalOpen, setIsManageModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false); // Estado para el modal de edición
+  const [editingProduct, setEditingProduct] = useState<any | null>(null); // Estado para el producto en edición
   const [categories, setCategories] = useState<any[]>([]);
 
   // Función para hacer login automático (temporal para desarrollo)
@@ -74,6 +77,17 @@ export default function Inventory() {
   // Función para manejar cuando se agrega un producto
   const handleProductAdded = async () => {
     await loadProducts(true);
+  };
+
+  // Función para manejar cuando se actualiza un producto
+  const handleProductUpdated = async () => {
+    await loadProducts(true);
+  };
+
+  // Función para abrir el modal de edición
+  const handleEditClick = (product: any) => {
+    setEditingProduct(product);
+    setIsEditModalOpen(true);
   };
 
   // Efecto para cargar datos al montar el componente
@@ -244,21 +258,47 @@ export default function Inventory() {
               <thead className="bg-background-secondary">
                 <tr>
                   <th className="text-left p-4 font-medium text-foreground-secondary">SKU</th>
+                  <th className="text-left p-4 font-medium text-foreground-secondary">Imagen</th>
+                  <th className="text-left p-4 font-medium text-foreground-secondary">URL Imagen (debug)</th>
                   <th className="text-left p-4 font-medium text-foreground-secondary">Producto</th>
                   <th className="text-left p-4 font-medium text-foreground-secondary">Categoría</th>
                   <th className="text-left p-4 font-medium text-foreground-secondary">Stock</th>
                   <th className="text-left p-4 font-medium text-foreground-secondary">Precio</th>
                   <th className="text-left p-4 font-medium text-foreground-secondary">Estado</th>
-                  <th className="text-left p-4 font-medium text-foreground-secondary">Acciones</th>
+                  <th className="text-center p-4 font-medium text-foreground-secondary">Acciones</th>
                 </tr>
               </thead>
               <tbody>
                 {products.map((product) => {
                   const statusInfo = getStatusInfo(product);
+                  const firstImage = product.images && product.images.length > 0 ? product.images[0] : null;
                   return (
                     <tr key={product.id} className="border-b border-card-border hover:bg-background-secondary/50">
                       <td className="p-4">
                         <span className="font-mono text-sm">{product.sku}</span>
+                      </td>
+                      <td className="p-4">
+                        {firstImage ? (
+                          <img
+                            src={`http://localhost:3001${firstImage}`}
+                            alt={product.name}
+                            className="w-12 h-12 object-cover rounded border border-border bg-white"
+                            onError={(e) => {
+                              const target = e.target as HTMLImageElement;
+                              target.onerror = null;
+                              target.src = '';
+                              target.alt = `Error: ${firstImage}`;
+                              target.parentElement!.innerHTML = `<div class='text-xs text-red-600 break-all'>Error cargando imagen<br/>${firstImage}</div>`;
+                            }}
+                          />
+                        ) : (
+                          <div className="w-12 h-12 flex items-center justify-center bg-muted rounded border border-border text-muted-foreground text-xl">
+                            🖼️
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-4 text-xs break-all max-w-xs">
+                        {firstImage ? `http://localhost:3001${firstImage}` : 'Sin imagen'}
                       </td>
                       <td className="p-4">
                         <div>
@@ -289,10 +329,22 @@ export default function Inventory() {
                         <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
                       </td>
                       <td className="p-4">
-                        <div className="flex items-center gap-1">
-                          <Button variant="ghost" size="sm">👁️</Button>
-                          <Button variant="ghost" size="sm">✏️</Button>
-                          <Button variant="ghost" size="sm">📋</Button>
+                        <div className="flex items-center justify-center gap-1">
+                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEditClick(product)} title="Editar Producto">
+                              <FilePenLine className="h-4 w-4" />
+                           </Button>
+                           <a href={`${apiService.getApiUrl()}/products/${product.id}/barcode`} target="_blank" rel="noopener noreferrer" title="Ver Código de Barras">
+                              <Button variant="ghost" size="icon" className="h-8 w-8">
+                                 <Barcode className="h-4 w-4" />
+                              </Button>
+                           </a>
+                           {product.datasheetUrl && (
+                              <a href={`${apiService.getApiUrl()}${product.datasheetUrl.startsWith('/') ? product.datasheetUrl : `/${product.datasheetUrl}`}`} target="_blank" rel="noopener noreferrer" title="Descargar Ficha Técnica">
+                                 <Button variant="ghost" size="icon" className="h-8 w-8">
+                                    <FileText className="h-4 w-4" />
+                                 </Button>
+                              </a>
+                           )}
                         </div>
                       </td>
                     </tr>
@@ -363,6 +415,16 @@ export default function Inventory() {
           onProductAdded={handleProductAdded}
           categories={categories}
         />
+
+        {editingProduct && (
+          <EditProductModal
+            isOpen={isEditModalOpen}
+            onClose={() => setIsEditModalOpen(false)}
+            product={editingProduct}
+            categories={categories}
+            onProductUpdated={handleProductUpdated}
+          />
+        )}
     </AppLayout>
   );
 }

@@ -1,5 +1,13 @@
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
+import { validateBody, validateParams } from '../middleware/validation';
+import { createResourceRateLimit } from '../middleware/rateLimiter';
+import { 
+  createCategorySchema, 
+  updateCategorySchema,
+  createSubcategorySchema,
+  idParamSchema 
+} from '../schemas/validation';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -34,16 +42,12 @@ router.get('/', async (req: any, res: any) => {
 });
 
 // Crear nueva categoría
-router.post('/', async (req: any, res: any) => {
-  try {
-    const { name, description } = req.body;
-
-    if (!name) {
-      return res.status(400).json({
-        error: 'Datos inválidos',
-        message: 'El nombre de la categoría es requerido'
-      });
-    }
+router.post('/', 
+  createResourceRateLimit,
+  validateBody(createCategorySchema),
+  async (req: any, res: any) => {
+    try {
+      const { name, description } = req.body;
 
     const category = await prisma.category.create({
       data: { name, description }
@@ -71,16 +75,12 @@ router.post('/', async (req: any, res: any) => {
 });
 
 // Crear subcategoría
-router.post('/subcategory', async (req: any, res: any) => {
-  try {
-    const { name, description, parentId } = req.body;
-
-    if (!name || !parentId) {
-      return res.status(400).json({
-        error: 'Datos inválidos',
-        message: 'El nombre y la categoría padre son requeridos'
-      });
-    }
+router.post('/subcategory', 
+  createResourceRateLimit,
+  validateBody(createSubcategorySchema),
+  async (req: any, res: any) => {
+    try {
+      const { name, description, parentId } = req.body;
 
     // Verificar que la categoría padre existe
     const parentCategory = await prisma.category.findUnique({
@@ -125,9 +125,11 @@ router.post('/subcategory', async (req: any, res: any) => {
 });
 
 // Eliminar categoría
-router.delete('/:id', async (req: any, res: any) => {
-  try {
-    const { id } = req.params;
+router.delete('/:id', 
+  validateParams(idParamSchema),
+  async (req: any, res: any) => {
+    try {
+      const { id } = req.params;
 
     // Verificar que la categoría existe
     const category = await prisma.category.findUnique({

@@ -1,3 +1,31 @@
+// ===== MARCAS =====
+model Brand {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@map("brands")
+}
+// ===== TOKENS DE REFRESCO Y BLACKLIST =====
+model RefreshToken {
+  id         String   @id @default(cuid())
+  token      String   @unique
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ip         String?
+  userAgent  String?
+  revoked    Boolean  @default(false)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  revokedAt  DateTime?
+  replacedBy String?
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
@@ -27,6 +55,7 @@ model User {
   sales          Sale[]
   serviceOrders  ServiceOrder[]
   inventoryMoves InventoryMove[]
+  refreshTokens  RefreshToken[]
 
   @@map("users")
 }
@@ -108,22 +137,24 @@ model Product {
   sku         String      @unique
   name        String
   description String?
-  categoryId  String
-  brand       String      // Cambiar de brandId a brand como texto libre
-  costPrice   Decimal     @db.Decimal(10, 2)
-  salePrice   Decimal     @db.Decimal(10, 2)
-  stock       Int         @default(0)
-  minStock    Int         @default(0)
+  brandId     String?
+  brand       Brand?    @relation(fields: [brandId], references: [id])
+  costPrice   Float    @default(0)
+  salePrice   Float
+  stock       Int      @default(0)
+  minStock    Int      @default(10)
   maxStock    Int?
-  barcode     String?     @unique
-  images      String[]    @default([])
-  status      ProductStatus @default(ACTIVE)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  barcode     String?
+  status      String   @default("ACTIVE") // ACTIVE, INACTIVE, DISCONTINUED
+  images      String[]
+  tags        String[]
 
-  // Relaciones
-  category       Category        @relation(fields: [categoryId], references: [id])
-  saleItems      SaleItem[]
+  datasheetUrl String? // Nuevo campo para la ficha técnica
+  metadata     Json?   // Nuevo campo para metadatos flexibles
+
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+  saleItems   SaleItem[]
   inventoryMoves InventoryMove[]
   serviceOrderItems ServiceOrderItem[]
 

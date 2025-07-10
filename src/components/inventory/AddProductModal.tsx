@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,7 +19,10 @@ export function AddProductModal({ isOpen, onClose, onProductAdded, categories }:
   const [parentCategories, setParentCategories] = useState<any[]>([]);
   const [subCategories, setSubCategories] = useState<any[]>([]);
   const [selectedParentCategory, setSelectedParentCategory] = useState('');
-  const [imageUrl, setImageUrl] = useState('');
+  // Para imágenes múltiples
+  const [selectedImages, setSelectedImages] = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   
   // Estado del formulario
   const [newProduct, setNewProduct] = useState({
@@ -34,31 +37,23 @@ export function AddProductModal({ isOpen, onClose, onProductAdded, categories }:
     minStock: ''
   });
 
-  // Función para subir imagen
-  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const formData = new FormData();
-    formData.append('image', file);
-
-    try {
-      const response = await fetch('http://localhost:3001/api/products/upload-image', {
-        method: 'POST',
-        body: formData
-      });
-
-      if (!response.ok) {
-        throw new Error('Error subiendo imagen');
-      }
-
-      const data = await response.json();
-      setImageUrl(data.data.imageUrl);
-    } catch (error) {
-      console.error('Error subiendo imagen:', error);
-      alert('Error al subir la imagen');
-    }
+  // Manejar selección de imágenes
+  const handleImagesChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files) return;
+    const fileArr = Array.from(files);
+    setSelectedImages(fileArr);
+    // Previsualizaciones
+    const previews = fileArr.map(file => URL.createObjectURL(file));
+    setImagePreviews(previews);
   };
+
+  // Limpiar URLs de previsualización al cerrar modal o cambiar imágenes
+  useEffect(() => {
+    return () => {
+      imagePreviews.forEach(url => URL.revokeObjectURL(url));
+    };
+  }, [imagePreviews]);
 
   // Cargar categorías principales cuando se abra el modal
   useEffect(() => {
@@ -92,26 +87,38 @@ export function AddProductModal({ isOpen, onClose, onProductAdded, categories }:
     try {
       // Determinar la categoría final (subcategoría si existe, sino la principal)
       const finalCategoryId = newProduct.subCategoryId || newProduct.parentCategoryId;
-      
       if (!finalCategoryId) {
         alert('Por favor selecciona una categoría');
+        setIsSubmitting(false);
         return;
       }
 
-      const productData = {
-        name: newProduct.name,
-        description: newProduct.description,
-        categoryId: finalCategoryId,
-        brand: newProduct.brand,
-        costPrice: parseFloat(newProduct.costPrice),
-        salePrice: parseFloat(newProduct.salePrice),
-        stock: parseInt(newProduct.stock),
-        minStock: parseInt(newProduct.minStock),
-        imageUrl: imageUrl || null
-      };
+      // Construir FormData
+      const formData = new FormData();
+      formData.append('name', newProduct.name);
+      formData.append('description', newProduct.description);
+      formData.append('categoryId', finalCategoryId);
+      formData.append('brand', newProduct.brand);
+      formData.append('costPrice', newProduct.costPrice);
+      formData.append('salePrice', newProduct.salePrice);
+      formData.append('stock', newProduct.stock);
+      formData.append('minStock', newProduct.minStock);
+      // Imágenes
+      selectedImages.forEach((file) => {
+        formData.append('images', file);
+      });
 
-      await apiService.products.create(productData);
-      
+      // Enviar a backend
+      const response = await fetch('http://localhost:3001/api/products', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Error creando producto');
+      }
+
       // Resetear formulario y cerrar modal
       setNewProduct({
         name: '',
@@ -126,10 +133,11 @@ export function AddProductModal({ isOpen, onClose, onProductAdded, categories }:
       });
       setSelectedParentCategory('');
       setSubCategories([]);
-      setImageUrl('');
+      setSelectedImages([]);
+      setImagePreviews([]);
+      if (fileInputRef.current) fileInputRef.current.value = '';
       onClose();
       onProductAdded();
-      
     } catch (error: any) {
       console.error('Error creando producto:', error);
       alert('Error al crear producto: ' + (error.message || 'Error desconocido'));
@@ -156,27 +164,34 @@ export function AddProductModal({ isOpen, onClose, onProductAdded, categories }:
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Campo de imagen */}
+          {/* Campo de imágenes múltiples */}
           <div>
-            <Label htmlFor="image">Imagen del Producto</Label>
-            <div className="flex items-center gap-4">
+            <Label htmlFor="images">Imágenes del Producto</Label>
+            <div className="flex items-center gap-4 flex-wrap">
               <Input
-                id="image"
+                id="images"
                 type="file"
                 accept="image/*"
-                onChange={handleImageUpload}
+                multiple
+                onChange={handleImagesChange}
                 className="flex-1"
+                ref={fileInputRef}
               />
-              {imageUrl && (
-                <div className="w-16 h-16 border border-border rounded overflow-hidden">
-                  <img 
-                    src={`http://localhost:3001${imageUrl}`} 
-                    alt="Preview" 
-                    className="w-full h-full object-cover" 
-                  />
+              {imagePreviews.length > 0 && (
+                <div className="flex gap-2 flex-wrap">
+                  {imagePreviews.map((url, idx) => (
+                    <div key={idx} className="w-16 h-16 border border-border rounded overflow-hidden relative">
+                      <img
+                        src={url}
+                        alt={`Preview ${idx + 1}`}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
+            <p className="text-xs text-muted-foreground mt-1">Puedes seleccionar hasta 5 imágenes.</p>
           </div>
 
           <div>

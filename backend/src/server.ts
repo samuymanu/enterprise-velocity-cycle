@@ -6,7 +6,11 @@ import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import { Server } from 'socket.io';
 import { createServer } from 'http';
-import dotenv from 'dotenv';
+import { PrismaClient } from '@prisma/client';
+import { getEnvConfig, getCorsOrigins, getRateLimitConfig } from './config/env';
+import path from 'path';
+import fs from 'fs';
+import multer from 'multer';
 
 // Importar rutas
 import authRoutes from './routes/auth';
@@ -30,11 +34,47 @@ import dashboardRoutes from './routes/dashboard';
 import { errorHandler } from './middleware/errorHandler';
 import { authMiddleware } from './middleware/auth';
 
-// Cargar variables de entorno
-dotenv.config();
+// Validar y cargar configuración de entorno
+const env = getEnvConfig();
 
 const app = express();
 const server = createServer(app);
+const prisma = new PrismaClient();
+
+// Crear directorio uploads si no existe
+const uploadsDir = path.join(__dirname, '..', 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Configuración de Multer para subida de imágenes
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadsDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB límite
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|webp/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+
+    if (mimetype && extname) {
+      return cb(null, true);
+    } else {
+      cb(new Error('Solo se permiten imágenes (jpeg, jpg, png, gif, webp)'));
+    }
+  }
+});
 
 // Configurar Socket.IO para tiempo real
 const io = new Server(server, {
@@ -51,81 +91,77 @@ const io = new Server(server, {
 });
 
 // Rate limiting
+const rateLimitConfig = getRateLimitConfig();
 const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000'), // 15 minutos
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100'), // máximo 100 requests por ventana
+  windowMs: rateLimitConfig.windowMs,
+  max: rateLimitConfig.max,
   message: {
     error: 'Demasiadas solicitudes, intenta de nuevo más tarde'
   }
 });
 
 // Middleware global
-app.use(helmet()); // Seguridad
-app.use(compression()); // Compresión
-app.use(morgan('combined')); // Logs
-app.use(limiter); // Rate limiting
+// Seguridad avanzada con Helmet y CSP estricta
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:', 'blob:'],
+      connectSrc: ["'self'", 'ws:', 'wss:'],
+      fontSrc: ["'self'", 'data:'],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'self'"],
+      upgradeInsecureRequests: [],
+    },
+  },
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  crossOriginResourcePolicy: { policy: 'same-origin' },
+  hsts: env.NODE_ENV === 'production' ? { maxAge: 63072000, includeSubDomains: true, preload: true } : false,
+}));
 
-// CORS configurado
-app.use(cors({
-  origin: [
-    'http://localhost:8080',
-    'http://localhost:8081',
-    'http://localhost:8082',
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'https://id-preview--f484a688-66c2-41f3-9bb8-d163ae469c3c.lovable.app',
-    'https://lovable.app',
-    'https://lovable-api.com',
-    // Agrega aquí otros dominios de Lovable si los usas
-  ],
+// Redirección a HTTPS en producción
+if (env.NODE_ENV === 'production') {
+  app.use((req, res, next) => {
+    if (req.headers['x-forwarded-proto'] !== 'https') {
+      return res.redirect(301, 'https://' + req.headers.host + req.url);
+    }
+    next();
+  });
+}
+app.use(compression()); // Compresión
+app.use(morgan('dev')); // Logs
+
+// Configuración de CORS
+const corsOptions = {
+  origin: getCorsOrigins(),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   exposedHeaders: ['Authorization']
-}));
+};
+app.use(cors(corsOptions));
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+// Servir archivos estáticos desde el directorio 'uploads' con CORS habilitado
+app.use('/uploads', cors(corsOptions), express.static(uploadsDir));
 
-// Manejar preflight requests
-app.options('*', (req, res) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.sendStatus(200);
-});
-
-// Rutas públicas (no requieren autenticación)
-app.use('/api/auth', authRoutes);
-
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
-  });
-});
-
-// Middleware de autenticación para rutas protegidas
-app.use('/api', (req, res, next) => {
-  // Excluir rutas públicas - usar la URL completa
-  if (req.url.startsWith('/auth') || req.url === '/health') {
-    return next();
-  }
-  // Permitir GET para categorías y marcas (para formularios)
-  if ((req.url.startsWith('/categories') || req.url.startsWith('/brands')) && req.method === 'GET') {
-    return next();
-  }
-  // Aplicar autenticación para todas las demás rutas /api/*
-  return authMiddleware(req, res, next);
-});
-
-// Rutas protegidas
-app.use('/api/users', userRoutes);
+// Rutas que manejan multipart/form-data (con Multer)
+// Estas deben ir ANTES de express.json()
 app.use('/api/products', productRoutes);
 app.use('/api/categories', categoryRoutes);
+
+// Middlewares globales que procesan JSON y URL-encoded.
+// Ahora se aplican después de las rutas de archivos.
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Aplicar rate limiting a todas las rutas restantes
+app.use('/api', limiter);
+
+// Definir otras rutas de la API
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
 app.use('/api/brands', brandRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/sales', saleRoutes);
@@ -170,12 +206,12 @@ io.on('connection', (socket) => {
 export { io };
 
 // Iniciar servidor
-const PORT = process.env.PORT || 3001;
+const PORT = env.PORT;
 
 server.listen(PORT, () => {
   console.log(`🚀 Servidor BikeShop ERP iniciado en puerto ${PORT}`);
   console.log(`📊 Dashboard: http://localhost:${PORT}/api/health`);
-  console.log(`🔒 Entorno: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔒 Entorno: ${env.NODE_ENV}`);
   console.log(`📡 Socket.IO habilitado para tiempo real`);
 });
 

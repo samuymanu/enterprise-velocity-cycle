@@ -12,10 +12,17 @@ const getHeaders = () => ({
 
 // Función helper para requests
 const apiRequest = async (endpoint: string, options: RequestInit = {}) => {
+  const headers: HeadersInit = getHeaders();
+
+  // Si el body es FormData, el navegador establece el Content-Type automáticamente
+  if (options.body instanceof FormData) {
+    delete (headers as any)['Content-Type'];
+  }
+
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
     ...options,
     headers: {
-      ...getHeaders(),
+      ...headers,
       ...options.headers
     }
   });
@@ -35,6 +42,8 @@ const apiRequest = async (endpoint: string, options: RequestInit = {}) => {
 
 // API Services
 export const apiService = {
+  getApiUrl: () => API_BASE_URL,
+
   // Autenticación
   auth: {
     login: async (identifier: string, password: string) => {
@@ -84,17 +93,17 @@ export const apiService = {
       return apiRequest(`/products/${id}`);
     },
 
-    create: async (productData: any) => {
+    create: async (productData: FormData) => {
       return apiRequest('/products', {
         method: 'POST',
-        body: JSON.stringify(productData)
+        body: productData
       });
     },
 
-    update: async (id: string, productData: any) => {
+    update: async (id: string, productData: FormData) => {
       return apiRequest(`/products/${id}`, {
         method: 'PUT',
-        body: JSON.stringify(productData)
+        body: productData
       });
     },
 

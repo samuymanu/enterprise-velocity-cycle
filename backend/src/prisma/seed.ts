@@ -1,23 +1,25 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { getEnvConfig } from '../config/env';
 
 const prisma = new PrismaClient();
+const env = getEnvConfig();
 
 async function main() {
   console.log('🌱 Iniciando seed de datos...');
 
   // Crear usuario administrador por defecto
-  const hashedPassword = await bcrypt.hash('admin123', 12);
+  const hashedPassword = await bcrypt.hash(env.ADMIN_PASSWORD, env.BCRYPT_ROUNDS);
   
   const admin = await prisma.user.upsert({
-    where: { email: 'admin@bikeshop.com' },
+    where: { email: env.ADMIN_EMAIL },
     update: {},
     create: {
-      email: 'admin@bikeshop.com',
+      email: env.ADMIN_EMAIL,
       username: 'admin',
       password: hashedPassword,
-      firstName: 'Administrador',
-      lastName: 'Sistema',
+      firstName: env.ADMIN_FIRST_NAME,
+      lastName: env.ADMIN_LAST_NAME,
       role: 'ADMIN'
     }
   });
@@ -193,36 +195,18 @@ async function main() {
 
   console.log('✅ Categorías jerárquicas creadas');
 
-  // Crear marcas por defecto
-  const brands = await Promise.all([
-    prisma.brand.upsert({
-      where: { name: 'Trek' },
-      update: {},
-      create: { name: 'Trek' }
-    }),
-    prisma.brand.upsert({
-      where: { name: 'Honda' },
-      update: {},
-      create: { name: 'Honda' }
-    }),
-    prisma.brand.upsert({
-      where: { name: 'Bell' },
-      update: {},
-      create: { name: 'Bell' }
-    }),
-    prisma.brand.upsert({
-      where: { name: 'Specialized' },
-      update: {},
-      create: { name: 'Specialized' }
-    }),
-    prisma.brand.upsert({
-      where: { name: 'Yamaha' },
-      update: {},
-      create: { name: 'Yamaha' }
-    })
-  ]);
-
-  console.log('✅ Marcas creadas:', brands.length);
+  // Crear marcas en la base de datos (si no existen)
+  const brandNames = ['Trek', 'Honda', 'Bell', 'Specialized', 'Yamaha'];
+  const brandRecords = await Promise.all(
+    brandNames.map(name =>
+      prisma.brand.upsert({
+        where: { name },
+        update: {},
+        create: { name }
+      })
+    )
+  );
+  console.log('✅ Marcas creadas:', brandRecords.map(b => b.name).join(', '));
 
   // Obtener categorías para crear productos
   const allCategories = await prisma.category.findMany();
@@ -231,12 +215,13 @@ async function main() {
   const mountainBikeCategory = allCategories.find((c: { name: string }) => c.name === 'Mountain Bike');
   const helmetCategory = allCategories.find((c: { name: string }) => c.name === 'Accesorios');
   const repuestosData = allCategories.find((c: { name: string }) => c.name === 'Repuestos');
-  
-  const trekBrand = brands.find(b => b.name === 'Trek');
-  const hondaBrand = brands.find(b => b.name === 'Honda');
-  const bellBrand = brands.find(b => b.name === 'Bell');
 
-  if (bicycleCategory !== undefined && motorcycleCategory !== undefined && helmetCategory !== undefined && trekBrand !== undefined && hondaBrand !== undefined && bellBrand !== undefined) {
+  // Obtener objetos de marca desde la BD
+  const trekBrand = brandRecords.find(b => b.name === 'Trek');
+  const hondaBrand = brandRecords.find(b => b.name === 'Honda');
+  const bellBrand = brandRecords.find(b => b.name === 'Bell');
+
+  if (bicycleCategory && motorcycleCategory && helmetCategory && trekBrand && hondaBrand && bellBrand) {
     const products = await Promise.all([
       prisma.product.upsert({
         where: { sku: 'BIC-001' },

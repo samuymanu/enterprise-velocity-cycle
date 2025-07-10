@@ -1,171 +1,246 @@
 import express, { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { PrismaClient } from '@prisma/client';
-import { body, validationResult } from 'express-validator';
+import { getEnvConfig, getJwtConfig } from '../config/env';
+import { validateBody } from '../middleware/validation';
+import { authRateLimit } from '../middleware/rateLimiter';
+import { 
+  registerSchema, 
+  loginSchema,
+  authHeaderSchema 
+} from '../schemas/validation';
 
 const router = express.Router();
 const prisma = new PrismaClient();
+const env = getEnvConfig();
+const jwtConfig = getJwtConfig();
 
 // Registro de usuario (solo admin puede crear usuarios)
-router.post('/register', [
-  body('email').isEmail().withMessage('Email inválido'),
-  body('username').isLength({ min: 3 }).withMessage('Username debe tener al menos 3 caracteres'),
-  body('password').isLength({ min: 6 }).withMessage('Password debe tener al menos 6 caracteres'),
-  body('firstName').notEmpty().withMessage('Nombre es requerido'),
-  body('lastName').notEmpty().withMessage('Apellido es requerido'),
-  body('role').isIn(['ADMIN', 'MANAGER', 'EMPLOYEE', 'TECHNICIAN', 'CASHIER']).withMessage('Rol inválido')
-], async (req: Request, res: Response) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        error: 'Datos inválidos',
-        details: errors.array()
+router.post('/register', 
+  authRateLimit,
+  validateBody(registerSchema),
+  async (req: Request, res: Response) => {
+    try {
+      const { email, username, password, firstName, lastName, role } = req.body;
+
+      // Verificar si el usuario ya existe
+      const existingUser = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { email },
+            { username }
+          ]
+        }
+      });
+
+      if (existingUser) {
+        return res.status(400).json({
+          error: 'Usuario ya existe',
+          message: 'Email o username ya están registrados'
+        });
+      }
+
+      // Hashear password
+      const hashedPassword = await bcrypt.hash(password, env.BCRYPT_ROUNDS);
+
+      // Crear usuario
+      const user = await prisma.user.create({
+        data: {
+          email,
+          username,
+          password: hashedPassword,
+          firstName,
+          lastName,
+          role
+        },
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          firstName: true,
+          lastName: true,
+          role: true,
+          isActive: true,
+          createdAt: true
+        }
+      });
+
+      res.status(201).json({
+        message: 'Usuario creado exitosamente',
+        user
+      });
+    } catch (error) {
+      console.error('Error en registro:', error);
+      res.status(500).json({
+        error: 'Error interno del servidor',
+        message: 'No se pudo crear el usuario'
       });
     }
-
-    const { email, username, password, firstName, lastName, role } = req.body;
-
-    // Verificar si el usuario ya existe
-    const existingUser = await prisma.user.findFirst({
-      where: {
-        OR: [
-          { email },
-          { username }
-        ]
-      }
-    });
-
-    if (existingUser) {
-      return res.status(400).json({
-        error: 'Usuario ya existe',
-        message: 'Email o username ya están registrados'
-      });
-    }
-
-    // Hashear password
-    const hashedPassword = await bcrypt.hash(password, 12);
-
-    // Crear usuario
-    const user = await prisma.user.create({
-      data: {
-        email,
-        username,
-        password: hashedPassword,
-        firstName,
-        lastName,
-        role
-      },
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-        isActive: true,
-        createdAt: true
-      }
-    });
-
-    res.status(201).json({
-      message: 'Usuario creado exitosamente',
-      user
-    });
-  } catch (error) {
-    console.error('Error en registro:', error);
-    res.status(500).json({
-      error: 'Error interno del servidor',
-      message: 'No se pudo crear el usuario'
-    });
   }
-});
+);
 
-// Login
-router.post('/login', [
-  body('identifier').notEmpty().withMessage('Email o username requerido'),
-  body('password').notEmpty().withMessage('Password requerido')
-], async (req: Request, res: Response) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        error: 'Datos inválidos',
-        details: errors.array()
+// Login con refresh token
+router.post('/login',
+  authRateLimit,
+  validateBody(loginSchema),
+  async (req: Request, res: Response) => {
+    try {
+      const { identifier, password } = req.body;
+      const user = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { email: identifier },
+            { username: identifier }
+          ],
+          isActive: true
+        }
       });
-    }
-
-    const { identifier, password } = req.body;
-
-    // Buscar usuario por email o username
-    const user = await prisma.user.findFirst({
-      where: {
-        OR: [
-          { email: identifier },
-          { username: identifier }
-        ],
-        isActive: true
+      if (!user) {
+        return res.status(401).json({
+          error: 'Credenciales inválidas',
+          message: 'Usuario o password incorrectos'
+        });
       }
-    });
-
-    if (!user) {
-      return res.status(401).json({
-        error: 'Credenciales inválidas',
-        message: 'Usuario o password incorrectos'
+      const isPasswordValid = await bcrypt.compare(password, user.password);
+      if (!isPasswordValid) {
+        return res.status(401).json({
+          error: 'Credenciales inválidas',
+          message: 'Usuario o password incorrectos'
+        });
+      }
+      // Generar access token
+      const token = jwt.sign(
+        { userId: user.id },
+        jwtConfig.secret ?? '',
+        { expiresIn: String(jwtConfig.expiresIn) }
+      );
+      // Generar refresh token seguro
+      const refreshToken = crypto.randomBytes(64).toString('hex');
+      const expiresAt = new Date(Date.now() + msToMs(String(jwtConfig.refreshExpiresIn)));
+      await prisma.refreshToken.create({
+        data: {
+          token: refreshToken,
+          userId: user.id,
+          ip: req.ip,
+          userAgent: req.headers['user-agent'] || null,
+          expiresAt
+        }
+      });
+      res.json({
+        message: 'Login exitoso',
+        token,
+        refreshToken,
+        user: {
+          id: user.id,
+          email: user.email,
+          username: user.username,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          role: user.role
+        }
+      });
+    } catch (error) {
+      console.error('Error en login:', error);
+      res.status(500).json({
+        error: 'Error interno del servidor',
+        message: 'No se pudo procesar el login'
       });
     }
+  }
+);
 
-    // Verificar password
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
-      return res.status(401).json({
-        error: 'Credenciales inválidas',
-        message: 'Usuario o password incorrectos'
-      });
+// Refresh token endpoint
+router.post('/refresh', async (req: Request, res: Response) => {
+  try {
+    const { refreshToken } = req.body;
+    if (!refreshToken) {
+      return res.status(400).json({ error: 'Refresh token requerido' });
     }
-
-    // Generar JWT
+    const stored = await prisma.refreshToken.findUnique({ where: { token: refreshToken } });
+    if (!stored || stored.revoked || stored.expiresAt < new Date()) {
+      return res.status(401).json({ error: 'Refresh token inválido o expirado' });
+    }
+    const user = await prisma.user.findUnique({ where: { id: stored.userId } });
+    if (!user || !user.isActive) {
+      return res.status(401).json({ error: 'Usuario no válido' });
+    }
+    // Generar nuevo access token
     const token = jwt.sign(
       { userId: user.id },
-      process.env.JWT_SECRET!,
-      { expiresIn: '7d' }
+      jwtConfig.secret ?? '',
+      { expiresIn: String(jwtConfig.expiresIn) }
     );
-
-    res.json({
-      message: 'Login exitoso',
-      token,
-      user: {
-        id: user.id,
-        email: user.email,
-        username: user.username,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        role: user.role
+    // Opcional: rotar refresh token
+    const newRefreshToken = crypto.randomBytes(64).toString('hex');
+    const expiresAt = new Date(Date.now() + msToMs(jwtConfig.refreshExpiresIn as string));
+    await prisma.refreshToken.update({
+      where: { token: refreshToken },
+      data: {
+        revoked: true,
+        revokedAt: new Date(),
+        replacedBy: newRefreshToken
       }
     });
-  } catch (error) {
-    console.error('Error en login:', error);
-    res.status(500).json({
-      error: 'Error interno del servidor',
-      message: 'No se pudo procesar el login'
+    await prisma.refreshToken.create({
+      data: {
+        token: newRefreshToken,
+        userId: user.id,
+        ip: req.ip,
+        userAgent: req.headers['user-agent'] || null,
+        expiresAt
+      }
     });
+    res.json({ token, refreshToken: newRefreshToken });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al refrescar token' });
   }
 });
+
+// Logout seguro (revoca refresh token)
+router.post('/logout', async (req: Request, res: Response) => {
+  try {
+    const { refreshToken } = req.body;
+    if (!refreshToken) {
+      return res.status(400).json({ error: 'Refresh token requerido' });
+    }
+    await prisma.refreshToken.updateMany({
+      where: { token: refreshToken, revoked: false },
+      data: { revoked: true, revokedAt: new Date() }
+    });
+    res.json({ message: 'Logout exitoso' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al hacer logout' });
+  }
+});
+
+// Helper para convertir string de tiempo a ms
+function msToMs(val: string): number {
+  // Soporta "7d", "15m", "3600000" (ms)
+  if (/^\d+$/.test(val)) return parseInt(val, 10);
+  if (val.endsWith('d')) return parseInt(val) * 24 * 60 * 60 * 1000;
+  if (val.endsWith('h')) return parseInt(val) * 60 * 60 * 1000;
+  if (val.endsWith('m')) return parseInt(val) * 60 * 1000;
+  if (val.endsWith('s')) return parseInt(val) * 1000;
+  return 15 * 60 * 1000; // fallback 15min
+}
 
 // Verificar token
 router.get('/verify', async (req: Request, res: Response) => {
   try {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-
-    if (!token) {
+    const authResult = authHeaderSchema.safeParse({ authorization: req.header('Authorization') });
+    
+    if (!authResult.success) {
       return res.status(401).json({
         error: 'Token requerido',
-        message: 'No se proporcionó token de autenticación'
+        message: 'No se proporcionó token de autenticación válido'
       });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+    const token = authResult.data.authorization.replace('Bearer ', '');
+
+    const decoded = jwt.verify(token, jwtConfig.secret) as any;
     
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },

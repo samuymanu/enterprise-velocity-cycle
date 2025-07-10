@@ -48,8 +48,8 @@ const testProductsModule = async () => {
     // 2. Hacer login con el usuario admin del seed
     console.log('🔐 2. Haciendo login...');
     const loginResult = await makeRequest('/api/auth/login', 'POST', {
-      identifier: 'admin@bikeshop.com',
-      password: 'admin123'
+      identifier: process.env.ADMIN_EMAIL || 'admin@bikeshop.com',
+      password: process.env.ADMIN_PASSWORD || 'DevAdmin@2025!'
     });
     console.log(`   Status: ${loginResult.status}`);
     
