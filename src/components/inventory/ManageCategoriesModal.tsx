@@ -8,8 +8,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Trash2, Plus, FolderPlus } from "lucide-react";
+import { Trash2, Plus, FolderPlus, Settings } from "lucide-react";
 import { apiService } from "@/lib/api";
+import { CategoryAttributesModal } from "./CategoryAttributesModal";
 
 interface ManageCategoriesModalProps {
   isOpen: boolean;
@@ -32,6 +33,10 @@ export function ManageCategoriesModal({ isOpen, onClose, onDataChange }: ManageC
   const [newSubcategoryDescription, setNewSubcategoryDescription] = useState('');
   const [selectedParentId, setSelectedParentId] = useState('');
   const [creatingSubcategory, setCreatingSubcategory] = useState(false);
+
+  // Estado para gestión de atributos
+  const [selectedCategoryForAttributes, setSelectedCategoryForAttributes] = useState<any>(null);
+  const [attributesModalOpen, setAttributesModalOpen] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -110,6 +115,11 @@ export function ManageCategoriesModal({ isOpen, onClose, onDataChange }: ManageC
     } catch (error: any) {
       alert('Error al eliminar categoría: ' + (error.message || 'Error desconocido'));
     }
+  };
+
+  const openAttributesModal = (category: any) => {
+    setSelectedCategoryForAttributes(category);
+    setAttributesModalOpen(true);
   };
 
   const getParentCategories = () => categories.filter(cat => !cat.parentId);
@@ -253,13 +263,23 @@ export function ManageCategoriesModal({ isOpen, onClose, onDataChange }: ManageC
                               <p className="text-sm text-muted-foreground">{category.description}</p>
                             )}
                           </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleDeleteCategory(category.id, category.name)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          <div className="flex gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openAttributesModal(category)}
+                            >
+                              <Settings className="h-4 w-4 mr-1" />
+                              Atributos
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDeleteCategory(category.id, category.name)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </div>
                         
                         {/* Subcategorías */}
@@ -272,13 +292,22 @@ export function ManageCategoriesModal({ isOpen, onClose, onDataChange }: ManageC
                                   <p className="text-xs text-muted-foreground">{subcategory.description}</p>
                                 )}
                               </div>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDeleteCategory(subcategory.id, subcategory.name)}
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
+                              <div className="flex gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => openAttributesModal(subcategory)}
+                                >
+                                  <Settings className="h-3 w-3" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleDeleteCategory(subcategory.id, subcategory.name)}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -296,6 +325,12 @@ export function ManageCategoriesModal({ isOpen, onClose, onDataChange }: ManageC
             Cerrar
           </Button>
         </div>
+
+        <CategoryAttributesModal
+          isOpen={attributesModalOpen}
+          onClose={() => setAttributesModalOpen(false)}
+          category={selectedCategoryForAttributes}
+        />
       </DialogContent>
     </Dialog>
   );

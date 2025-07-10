@@ -23,6 +23,7 @@ import saleRoutes from './routes/sales';
 import serviceOrderRoutes from './routes/serviceOrders';
 import inventoryRoutes from './routes/inventory';
 import dashboardRoutes from './routes/dashboard';
+import attributeRoutes from './routes/attributes';
 
 // Importar middleware
 // Asegúrate de que el archivo exista en './middleware/errorHandler.ts' o corrige la ruta/nombre si es necesario
@@ -168,6 +169,7 @@ app.use('/api/sales', saleRoutes);
 app.use('/api/service-orders', serviceOrderRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/attributes', attributeRoutes);
 
 // Middleware de manejo de errores (debe ir al final)
 app.use(errorHandler);

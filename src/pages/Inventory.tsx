@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ManageCategoriesModal } from "@/components/inventory/ManageCategoriesModal";
+import { ManageAttributesModal } from "@/components/inventory/ManageAttributesModal";
 import { AddProductModal } from "@/components/inventory/AddProductModal";
 import { EditProductModal } from "@/components/inventory/EditProductModal"; // Importar el nuevo modal
 import { apiService } from "@/lib/api";
@@ -24,6 +25,7 @@ export default function Inventory() {
   // Estado para modales
   const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
   const [isManageModalOpen, setIsManageModalOpen] = useState(false);
+  const [isAttributesModalOpen, setIsAttributesModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false); // Estado para el modal de edición
   const [editingProduct, setEditingProduct] = useState<any | null>(null); // Estado para el producto en edición
   const [categories, setCategories] = useState<any[]>([]);
@@ -162,7 +164,16 @@ export default function Inventory() {
               className="flex items-center gap-2"
             >
               <Settings className="h-4 w-4" />
-              Gestionar
+              Categorías
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setIsAttributesModalOpen(true)}
+              className="flex items-center gap-2"
+            >
+              <Settings className="h-4 w-4" />
+              Atributos
             </Button>
             <Button 
               variant="outline" 
@@ -407,6 +418,12 @@ export default function Inventory() {
           isOpen={isManageModalOpen}
           onClose={() => setIsManageModalOpen(false)}
           onDataChange={loadCategories}
+        />
+        
+        <ManageAttributesModal
+          isOpen={isAttributesModalOpen}
+          onClose={() => setIsAttributesModalOpen(false)}
+          categories={categories}
         />
         
         <AddProductModal 
