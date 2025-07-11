@@ -109,7 +109,7 @@ app.use(helmet({
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", 'data:', 'blob:'],
+      imgSrc: ["'self'", 'data:', 'blob:', 'http://localhost:8080', 'http://localhost:3000', 'http://localhost:5173'],
       connectSrc: ["'self'", 'ws:', 'wss:'],
       fontSrc: ["'self'", 'data:'],
       objectSrc: ["'none'"],
@@ -118,7 +118,7 @@ app.use(helmet({
     },
   },
   referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
-  crossOriginResourcePolicy: { policy: 'same-origin' },
+  // crossOriginResourcePolicy: { policy: 'cross-origin' }, // Omitido para evitar bloqueos
   hsts: env.NODE_ENV === 'production' ? { maxAge: 63072000, includeSubDomains: true, preload: true } : false,
 }));
 
@@ -134,18 +134,37 @@ if (env.NODE_ENV === 'production') {
 app.use(compression()); // Compresión
 app.use(morgan('dev')); // Logs
 
-// Configuración de CORS
-const corsOptions = {
-  origin: getCorsOrigins(),
+// Configuración de CORS robusta y única
+const allowedOrigins = [
+  'http://localhost:8080',
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://localhost:8081',
+  'http://localhost:8082'
+];
+app.use(cors({
+  origin: function (origin, callback) {
+    // Permitir peticiones sin origen (como curl o postman)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      return callback(new Error('No permitido por CORS'), false);
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   exposedHeaders: ['Authorization']
-};
-app.use(cors(corsOptions));
+}));
 
-// Servir archivos estáticos desde el directorio 'uploads' con CORS habilitado
-app.use('/uploads', cors(corsOptions), express.static(uploadsDir));
+// Servir archivos estáticos con CORS para todos los orígenes permitidos
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads'), {
+  setHeaders: (res, path, stat) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  }
+}));
 
 // Rutas que manejan multipart/form-data (con Multer)
 // Estas deben ir ANTES de express.json()

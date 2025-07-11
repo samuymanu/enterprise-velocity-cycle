@@ -95,23 +95,25 @@ export default function Customers() {
         <Card className="enterprise-card p-6">
           <div className="flex flex-col md:flex-row gap-4">
             <input 
+              id="customers-search"
+              name="customers-search"
               type="text" 
               placeholder="Buscar por documento, nombre, email o teléfono..."
               className="enterprise-input flex-1"
             />
             <div className="flex gap-2">
-              <select className="enterprise-input">
+              <select id="customers-type" name="customers-type" className="enterprise-input">
                 <option>Todos los tipos</option>
                 <option>Personas</option>
                 <option>Empresas</option>
               </select>
-              <select className="enterprise-input">
+              <select id="customers-category" name="customers-category" className="enterprise-input">
                 <option>Todas las categorías</option>
                 <option>Regular</option>
                 <option>VIP</option>
                 <option>Mayorista</option>
               </select>
-              <select className="enterprise-input">
+              <select id="customers-status" name="customers-status" className="enterprise-input">
                 <option>Todos los estados</option>
                 <option>Al día</option>
                 <option>Con deuda</option>

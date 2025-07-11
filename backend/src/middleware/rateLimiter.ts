@@ -89,7 +89,7 @@ export const searchRateLimit = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => isDevelopment() && req.ip === '127.0.0.1'
+  skip: (req) => isDevelopment() || req.ip === '127.0.0.1' || req.ip === '::1'
 });
 
 /**
@@ -99,7 +99,7 @@ export const searchRateLimit = rateLimit({
 export const apiSlowDown = slowDown({
   windowMs: 15 * 60 * 1000, // 15 minutos
   delayAfter: 50, // Después de 50 requests, empezar a delay
-  delayMs: 100, // Incrementar delay en 100ms por request
+  delayMs: () => 100, // Incrementar delay en 100ms por request (nuevo comportamiento v2)
   maxDelayMs: 5000, // Máximo delay de 5 segundos
   skip: (req) => isDevelopment() && req.ip === '127.0.0.1'
 });

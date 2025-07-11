@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +21,11 @@ interface EditProductModalProps {
 export function EditProductModal({ isOpen, onClose, product, categories, onProductUpdated }: EditProductModalProps) {
   const { toast } = useToast();
   const [formData, setFormData] = useState<any>({});
+  // Atributos dinámicos
+  const [attributes, setAttributes] = useState<any[]>([]);
+  const [attributeValues, setAttributeValues] = useState<Record<string, any>>({});
+  const [attrLoading, setAttrLoading] = useState(false);
+  const [attrErrors, setAttrErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [existingImages, setExistingImages] = useState<string[]>([]);
@@ -41,8 +47,40 @@ export function EditProductModal({ isOpen, onClose, product, categories, onProdu
       });
       setExistingImages(product.images || []);
       setImageFiles([]); // Resetear archivos nuevos al cambiar de producto
+      // Cargar atributos dinámicos y valores
+      loadAttributes(product.categoryId, product.id);
     }
+    // eslint-disable-next-line
   }, [product]);
+
+  // Cargar atributos dinámicos y valores actuales
+  const loadAttributes = async (categoryId: string, productId: string) => {
+    if (!categoryId) {
+      setAttributes([]);
+      setAttributeValues({});
+      setAttrErrors({});
+      return;
+    }
+    setAttrLoading(true);
+    try {
+      const data = await apiService.products.getAttributesByCategory(categoryId);
+      setAttributes(data.attributes || []);
+      // Obtener valores actuales del producto
+      const prod = await apiService.products.getById(productId);
+      const attrVals: Record<string, any> = {};
+      if (prod && prod.attributeValues) {
+        for (const av of prod.attributeValues) {
+          attrVals[av.attributeId] = av.value;
+        }
+      }
+      setAttributeValues(attrVals);
+    } catch {
+      setAttributes([]);
+      setAttributeValues({});
+    } finally {
+      setAttrLoading(false);
+    }
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -51,6 +89,9 @@ export function EditProductModal({ isOpen, onClose, product, categories, onProdu
 
   const handleSelectChange = (name: string, value: string) => {
     setFormData({ ...formData, [name]: value });
+    if (name === 'categoryId' && product) {
+      loadAttributes(value, product.id);
+    }
   };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -70,16 +111,24 @@ export function EditProductModal({ isOpen, onClose, product, categories, onProdu
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-
-
-
+    // Validar atributos requeridos
+    const errors: Record<string, string> = {};
+    for (const attr of attributes) {
+      if (attr.isRequired && (attributeValues[attr.attributeId] === undefined || attributeValues[attr.attributeId] === '' || attributeValues[attr.attributeId] === null)) {
+        errors[attr.attributeId] = 'Este campo es obligatorio';
+      }
+    }
+    setAttrErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      setIsSubmitting(false);
+      return;
+    }
     // Limpiar imágenes existentes: solo rutas válidas, sin duplicados ni vacíos
     const cleanedExistingImages = Array.from(new Set(
       (existingImages || [])
         .map(img => typeof img === 'string' ? img.trim() : '')
         .filter(img => img && img.startsWith('/uploads/'))
     ));
-
     const submissionData = new FormData();
     Object.keys(formData).forEach(key => {
       submissionData.append(key, formData[key]);
@@ -90,7 +139,10 @@ export function EditProductModal({ isOpen, onClose, product, categories, onProdu
     imageFiles.forEach(file => {
       submissionData.append('images', file);
     });
-
+    // Atributos dinámicos
+    submissionData.append('attributes', JSON.stringify(
+      attributes.map(attr => ({ attributeId: attr.attributeId, value: attributeValues[attr.attributeId] ?? '' }))
+    ));
     try {
       await apiService.products.update(product.id, submissionData);
       toast({ title: "Éxito", description: "Producto actualizado correctamente." });
@@ -108,7 +160,7 @@ export function EditProductModal({ isOpen, onClose, product, categories, onProdu
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[600px]">
+      <DialogContent className="sm:max-w-[700px]">
         <DialogHeader>
           <DialogTitle>Editar Producto (SKU: {product.sku})</DialogTitle>
         </DialogHeader>
@@ -125,18 +177,86 @@ export function EditProductModal({ isOpen, onClose, product, categories, onProdu
                   <SelectValue placeholder="Seleccionar categoría" />
                 </SelectTrigger>
                 <SelectContent>
-                  {categories.filter(c => c.level === 0).map(cat => (
-                    <optgroup key={cat.id} label={cat.name}>
-                      {categories.filter(sub => sub.parentId === cat.id).map(subcat => (
-                        <SelectItem key={subcat.id} value={subcat.id}>{subcat.name}</SelectItem>
-                      ))}
-                    </optgroup>
-                  ))}
+                  {categories
+                    .filter(c => c.level === 0)
+                    .map(cat => (
+                      <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                    ))}
+                  {categories
+                    .filter(c => c.level !== 0)
+                    .map(subcat => (
+                      <SelectItem key={subcat.id} value={subcat.id}>{subcat.name}</SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>
           </div>
-          
+
+          {/* Inputs dinámicos de atributos */}
+          {attrLoading && <div className="text-xs text-muted-foreground">Cargando atributos...</div>}
+          {attributes.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {attributes.map(attr => (
+                <div key={attr.attributeId} className="flex flex-col">
+                  <Label className="mb-1 font-medium text-sm">{attr.name}{attr.isRequired && <span className="text-destructive">*</span>}</Label>
+                  {attr.type === 'STRING' && (
+                    <Input
+                      id={`attr-${attr.attributeId}`}
+                      name={`attr-${attr.attributeId}`}
+                      value={attributeValues[attr.attributeId] || ''}
+                      onChange={e => setAttributeValues(v => ({ ...v, [attr.attributeId]: e.target.value }))}
+                      placeholder={'Ingrese ' + attr.name}
+                    />
+                  )}
+                  {attr.type === 'NUMBER' && (
+                    <Input
+                      id={`attr-${attr.attributeId}`}
+                      name={`attr-${attr.attributeId}`}
+                      type="number"
+                      value={attributeValues[attr.attributeId] || ''}
+                      onChange={e => setAttributeValues(v => ({ ...v, [attr.attributeId]: e.target.value }))}
+                      placeholder={'Ingrese ' + attr.name}
+                    />
+                  )}
+                  {attr.type === 'BOOLEAN' && (
+                    <Switch
+                      checked={!!attributeValues[attr.attributeId]}
+                      onCheckedChange={val => setAttributeValues(v => ({ ...v, [attr.attributeId]: val }))}
+                    />
+                  )}
+                  {attr.type === 'LIST' && (
+                    <Select
+                      value={attributeValues[attr.attributeId] || ''}
+                      onValueChange={val => setAttributeValues(v => ({ ...v, [attr.attributeId]: val }))}
+                    >
+                      <SelectTrigger id={`attr-${attr.attributeId}-trigger`} name={`attr-${attr.attributeId}-trigger`}>
+                        <SelectValue placeholder={'Seleccionar ' + attr.name} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">Todos</SelectItem>
+                        {attr.values.map((val: string) => (
+                          <SelectItem key={val} value={val}>{val}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  {attr.type === 'DATE' && (
+                    <Input
+                      id={`attr-${attr.attributeId}`}
+                      name={`attr-${attr.attributeId}`}
+                      type="date"
+                      value={attributeValues[attr.attributeId] || ''}
+                      onChange={e => setAttributeValues(v => ({ ...v, [attr.attributeId]: e.target.value }))}
+                    />
+                  )}
+                  {attrErrors[attr.attributeId] && (
+                    <span className="text-xs text-destructive">{attrErrors[attr.attributeId]}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="space-y-2">
             <Label htmlFor="description">Descripción</Label>
             <Textarea id="description" name="description" value={formData.description} onChange={handleChange} />
@@ -190,7 +310,7 @@ export function EditProductModal({ isOpen, onClose, product, categories, onProdu
             <div className="flex flex-wrap gap-2">
               {existingImages.map(url => (
                 <div key={url} className="relative w-24 h-24">
-                  <img src={`http://localhost:3001${url}`} alt="Producto" className="w-full h-full object-cover rounded-md" />
+                  <img src={'http://localhost:3001' + url} alt="Producto" className="w-full h-full object-cover rounded-md" />
                   <Button type="button" variant="destructive" size="icon" className="absolute top-0 right-0 h-6 w-6" onClick={() => removeExistingImage(url)}>
                     <X className="h-4 w-4" />
                   </Button>

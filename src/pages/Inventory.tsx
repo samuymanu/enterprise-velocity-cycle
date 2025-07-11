@@ -10,12 +10,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { ManageCategoriesModal } from "@/components/inventory/ManageCategoriesModal";
 import { ManageAttributesModal } from "@/components/inventory/ManageAttributesModal";
 import { AddProductModal } from "@/components/inventory/AddProductModal";
-import { EditProductModal } from "@/components/inventory/EditProductModal"; // Importar el nuevo modal
+import { EditProductModal } from "@/components/inventory/EditProductModal";
+import { DynamicFilters } from "@/components/inventory/DynamicFilters";
 import { apiService } from "@/lib/api";
 import { useState, useEffect } from "react";
 import { Settings, Plus, RefreshCw, FilePenLine, Barcode, Download, FileText } from "lucide-react";
+import ProductImage from "@/components/inventory/ProductImage";
 
 export default function Inventory() {
+  // Estado para imágenes con error
+  const [imageErrorIds, setImageErrorIds] = useState<Set<string>>(new Set());
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshingProducts, setRefreshingProducts] = useState(false);
@@ -29,29 +33,48 @@ export default function Inventory() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false); // Estado para el modal de edición
   const [editingProduct, setEditingProduct] = useState<any | null>(null); // Estado para el producto en edición
   const [categories, setCategories] = useState<any[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [dynamicFilters, setDynamicFilters] = useState<Record<string, string>>({});
 
-  // Función para hacer login automático (temporal para desarrollo)
+  // Controla si ya se intentó auto-login para evitar bucles
+  const [autoLoginAttempted, setAutoLoginAttempted] = useState(false);
   const autoLogin = async () => {
+    const token = localStorage.getItem('authToken');
+    if (token) {
+      setIsAuthenticated(true);
+      return true;
+    }
+    if (autoLoginAttempted) {
+      // Ya se intentó, no volver a intentar
+      setLoading(false);
+      return false;
+    }
+    setAutoLoginAttempted(true);
     try {
       await apiService.auth.login('admin@bikeshop.com', 'admin123');
       setIsAuthenticated(true);
       return true;
-    } catch (error) {
-      console.error('Error en auto-login:', error);
-      setError('Error de autenticación');
+    } catch (error: any) {
+      if (error.message && error.message.includes('429')) {
+        setError('Demasiados intentos de autenticación. Espera unos minutos antes de reintentar.');
+      } else {
+        setError('Error de autenticación');
+      }
+      setIsAuthenticated(false);
+      setLoading(false);
       return false;
     }
   };
 
   // Función para cargar productos
-  const loadProducts = async (isRefresh = false) => {
+  const loadProducts = async (isRefresh = false, filters: any = {}) => {
     try {
       if (isRefresh) {
         setRefreshingProducts(true);
       } else {
         setLoading(true);
       }
-      const data = await apiService.products.getAll();
+      const data = await apiService.products.getAll(filters);
       setProducts(data.products || []);
       setError(null);
     } catch (error: any) {
@@ -93,19 +116,53 @@ export default function Inventory() {
   };
 
   // Efecto para cargar datos al montar el componente
+  // Carga inicial y recarga por filtros, pero solo una vez
   useEffect(() => {
     const initializeData = async () => {
+      setLoading(true);
       const loginSuccess = await autoLogin();
-      if (loginSuccess) {
-        await Promise.all([
-          loadProducts(),
-          loadCategories()
-        ]);
+      if (!loginSuccess) {
+        setLoading(false);
+        return;
+      }
+      try {
+        await loadCategories();
+        // Cargar productos con filtros actuales
+        const filters: any = { ...dynamicFilters };
+        if (selectedCategory) filters.categoryId = selectedCategory;
+        await loadProducts(false, filters);
+      } catch (e) {
+        setError('Error cargando datos iniciales');
+      } finally {
+        setLoading(false);
       }
     };
-    
-    initializeData();
-  }, []);
+    if (!localStorage.getItem('authToken')) {
+      initializeData();
+    } else {
+      setIsAuthenticated(true);
+      setLoading(true);
+      loadCategories()
+        .then(() => {
+          const filters: any = { ...dynamicFilters };
+          if (selectedCategory) filters.categoryId = selectedCategory;
+          return loadProducts(false, filters);
+        })
+        .catch(() => setError('Error cargando datos iniciales'))
+        .finally(() => setLoading(false));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoLoginAttempted]);
+
+  // Recargar productos solo si cambian los filtros después del primer render
+  useEffect(() => {
+    if (!loading) {
+      const filters: any = { ...dynamicFilters };
+      if (selectedCategory) filters.categoryId = selectedCategory;
+      loadProducts(false, filters);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCategory, dynamicFilters]);
 
   // Función para mapear status del backend al frontend
   const getStatusInfo = (product: any) => {
@@ -132,8 +189,12 @@ export default function Inventory() {
       <AppLayout>
         <div className="container-enterprise py-8">
           <div className="text-center text-red-600">
-            <p className="text-lg">Error: {error}</p>
-            <Button onClick={() => window.location.reload()} className="mt-4">
+            <p className="text-lg">{error}</p>
+            <Button onClick={() => {
+              setError(null);
+              setAutoLoginAttempted(false);
+              window.location.reload();
+            }} className="mt-4">
               Reintentar
             </Button>
           </div>
@@ -222,33 +283,45 @@ export default function Inventory() {
           </Card>
         </div>
 
-        {/* Filters and Search */}
-        <Card className="enterprise-card p-6">
+        {/* Filtros avanzados */}
+        <Card className="enterprise-card p-6 mb-2">
           <div className="flex flex-col md:flex-row gap-4">
-            <input 
-              type="text" 
+            <input
+              id="inventory-search"
+              name="inventory-search"
+              type="text"
               placeholder="Buscar por SKU, nombre, marca o código de barras..."
               className="enterprise-input flex-1"
+              onChange={e => loadProducts(false, { search: e.target.value, ...dynamicFilters, categoryId: selectedCategory })}
             />
             <div className="flex gap-2">
-              <select className="enterprise-input">
-                <option>Todas las categorías</option>
-                <option>Bicicletas</option>
-                <option>Motocicletas</option>
-                <option>Repuestos</option>
-                <option>Accesorios</option>
-                <option>Cascos</option>
+              <select
+                id="inventory-category"
+                name="inventory-category"
+                className="enterprise-input"
+                value={selectedCategory || ''}
+                onChange={e => setSelectedCategory(e.target.value || null)}
+              >
+                <option value="">Todas las categorías</option>
+                {categories.map(cat => (
+                  <option key={cat.id} value={cat.id}>{cat.name}</option>
+                ))}
               </select>
-              <select className="enterprise-input">
-                <option>Todos los estados</option>
-                <option>Stock normal</option>
-                <option>Stock bajo</option>
-                <option>Sin stock</option>
-                <option>Inactivos</option>
+              <select id="inventory-status" name="inventory-status" className="enterprise-input" onChange={e => loadProducts(false, { status: e.target.value, ...dynamicFilters, categoryId: selectedCategory })}>
+                <option value="">Todos los estados</option>
+                <option value="ACTIVE">Stock normal</option>
+                <option value="STOCK_BAJO">Stock bajo</option>
+                <option value="SIN_STOCK">Sin stock</option>
+                <option value="INACTIVE">Inactivos</option>
               </select>
-              <Button>🔍 Filtrar</Button>
+              <Button onClick={() => loadProducts(true, { ...dynamicFilters, categoryId: selectedCategory })}>🔍 Filtrar</Button>
             </div>
           </div>
+          {/* Filtros dinámicos por atributos */}
+          <DynamicFilters
+            categoryId={selectedCategory}
+            onFilterChange={setDynamicFilters}
+          />
         </Card>
 
         {/* Products Table */}
@@ -289,24 +362,10 @@ export default function Inventory() {
                         <span className="font-mono text-sm">{product.sku}</span>
                       </td>
                       <td className="p-4">
-                        {firstImage ? (
-                          <img
-                            src={`http://localhost:3001${firstImage}`}
-                            alt={product.name}
-                            className="w-12 h-12 object-cover rounded border border-border bg-white"
-                            onError={(e) => {
-                              const target = e.target as HTMLImageElement;
-                              target.onerror = null;
-                              target.src = '';
-                              target.alt = `Error: ${firstImage}`;
-                              target.parentElement!.innerHTML = `<div class='text-xs text-red-600 break-all'>Error cargando imagen<br/>${firstImage}</div>`;
-                            }}
-                          />
-                        ) : (
-                          <div className="w-12 h-12 flex items-center justify-center bg-muted rounded border border-border text-muted-foreground text-xl">
-                            🖼️
-                          </div>
-                        )}
+                        <ProductImage
+                          src={firstImage}
+                          alt={product.name}
+                        />
                       </td>
                       <td className="p-4 text-xs break-all max-w-xs">
                         {firstImage ? `http://localhost:3001${firstImage}` : 'Sin imagen'}

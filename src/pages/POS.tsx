@@ -34,6 +34,8 @@ export default function POS() {
               <div className="space-y-4">
                 <div className="flex gap-2">
                   <input 
+                    id="pos-product-search"
+                    name="pos-product-search"
                     type="text" 
                     placeholder="Buscar por código, nombre o escanear código de barras..."
                     className="enterprise-input flex-1"
@@ -117,6 +119,8 @@ export default function POS() {
               <h3 className="text-lg font-semibold text-foreground mb-4">Cliente</h3>
               <div className="space-y-3">
                 <input 
+                  id="pos-customer-search"
+                  name="pos-customer-search"
                   type="text" 
                   placeholder="Buscar cliente por documento o nombre..."
                   className="enterprise-input w-full"

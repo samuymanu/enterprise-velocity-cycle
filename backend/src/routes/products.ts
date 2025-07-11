@@ -1,3 +1,4 @@
+// ...existing code...
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import multer from 'multer';
@@ -13,6 +14,8 @@ import {
   productQuerySchema,
   idParamSchema
 } from '../schemas/validation';
+import * as xlsx from 'xlsx';
+import { parse as csvParse } from 'csv-parse/sync';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -105,13 +108,11 @@ router.get('/',
   validateQuery(productQuerySchema),
   async (req: any, res: any) => {
     try {
-      const { page = 1, limit = 20, search, category, brand, status } = req.query;
-
+      const { page = 1, limit = 20, search, category, brand, status, ...rest } = req.query;
       const skip = (page - 1) * limit;
 
-      // Construir filtros
+      // Filtros estándar
       const where: any = {};
-
       if (search) {
         where.OR = [
           { name: { contains: search, mode: 'insensitive' } },
@@ -119,50 +120,93 @@ router.get('/',
           { barcode: { contains: search, mode: 'insensitive' } }
         ];
       }
-
       if (category) {
         where.category = { name: category };
       }
-
       if (brand) {
         where.brand = { contains: brand, mode: 'insensitive' };
       }
-
       if (status) {
         where.status = status;
       }
 
-      // Obtener productos
-      const [products, total] = await Promise.all([
-        prisma.product.findMany({
-          where,
-          include: {
-            category: true
-          },
-        orderBy: { id: 'desc' },
-        skip,
-        take: limit
-      }),
-      prisma.product.count({ where })
-    ]);
+      // Filtros por atributos dinámicos
+      const attributeFilters = Object.entries(rest)
+        .filter(([key]) => key.startsWith('attribute_'))
+        .map(([key, value]) => ({ attributeId: key.replace('attribute_', ''), value }));
 
-    res.json({
-      products,
-      pagination: {
-        page,
-        limit,
-        total,
-        pages: Math.ceil(total / limit)
+      let products: any[] = [];
+      let total = 0;
+
+      if (attributeFilters.length === 0) {
+        // Sin filtros dinámicos: consulta normal
+        [products, total] = await Promise.all([
+          prisma.product.findMany({
+            where,
+            include: { category: true },
+            orderBy: { id: 'desc' },
+            skip,
+            take: limit
+          }),
+          prisma.product.count({ where })
+        ]);
+      } else {
+        // Con filtros dinámicos: buscar productos que tengan TODOS los atributos requeridos
+        // 1. Buscar los productId que cumplen todos los atributos
+        const productIds = await prisma.productAttributeValue.findMany({
+          where: {
+            OR: attributeFilters.map(f => ({ attributeId: f.attributeId, value: String(f.value) }))
+          },
+          select: { productId: true, attributeId: true }
+        });
+        // Contar ocurrencias por productId
+        const countByProduct: Record<string, number> = {};
+        for (const row of productIds) {
+          countByProduct[row.productId] = (countByProduct[row.productId] || 0) + 1;
+        }
+        // Solo los que cumplen todos los atributos
+        const filteredProductIds = Object.entries(countByProduct)
+          .filter(([_, count]) => count === attributeFilters.length)
+          .map(([productId]) => productId);
+
+        // 2. Buscar productos finales
+        [products, total] = await Promise.all([
+          prisma.product.findMany({
+            where: {
+              ...where,
+              id: { in: filteredProductIds }
+            },
+            include: { category: true },
+            orderBy: { id: 'desc' },
+            skip,
+            take: limit
+          }),
+          prisma.product.count({
+            where: {
+              ...where,
+              id: { in: filteredProductIds }
+            }
+          })
+        ]);
       }
-    });
-  } catch (error) {
-    console.error('Error obteniendo productos:', error);
-    res.status(500).json({
-      error: 'Error interno del servidor',
-      message: 'No se pudieron obtener los productos'
-    });
-  }
-});
+
+      res.json({
+        products,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit)
+        }
+      });
+    } catch (error) {
+      console.error('Error obteniendo productos:', error);
+      res.status(500).json({
+        error: 'Error interno del servidor',
+        message: 'No se pudieron obtener los productos'
+      });
+    }
+  });
 
 // Obtener producto por ID
 router.get('/:id', async (req: any, res: any) => {
@@ -254,7 +298,8 @@ router.post('/',
         maxStock,
         status,
         categoryId,
-        metadata // Se recibe como string desde multipart/form-data
+        metadata, // Se recibe como string desde multipart/form-data
+        attributes // Nuevo: array de { attributeId, value }
       } = req.body;
 
       // Parsear metadata si existe
@@ -272,97 +317,107 @@ router.post('/',
         }
       }
 
+      // Procesar archivos subidos desde req.files (que ahora es un objeto)
+      const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+      const imagePaths: string[] = files['images']?.map(file => `/uploads/${file.filename}`) || [];
+      const datasheetFile = files['datasheet']?.[0];
+      const datasheetUrl = datasheetFile ? `/uploads/${datasheetFile.filename}` : null;
 
-    // Procesar archivos subidos desde req.files (que ahora es un objeto)
-    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-    const imagePaths: string[] = files['images']?.map(file => `/uploads/${file.filename}`) || [];
-    const datasheetFile = files['datasheet']?.[0];
-    const datasheetUrl = datasheetFile ? `/uploads/${datasheetFile.filename}` : null;
+      // 1. Obtener la categoría para generar el SKU y validar atributos
+      const category = await prisma.category.findUnique({
+        where: { id: categoryId },
+        include: {
+          categoryAttributes: { include: { attribute: true } },
+          parent: true
+        }
+      }) as any;
+      if (!category) {
+        return res.status(400).json({ success: false, error: 'Categoría no encontrada' });
+      }
 
+      // Validar atributos dinámicos
+      let attributesArray: Array<{ attributeId: string, value: string }> = [];
+      if (attributes) {
+        try {
+          attributesArray = typeof attributes === 'string' ? JSON.parse(attributes) : attributes;
+        } catch (e) {
+          return res.status(400).json({ error: 'Formato de atributos inválido' });
+        }
+      }
+      // Validar que los atributos correspondan a la categoría
+      const validAttributeIds = (category.categoryAttributes ?? []).map((ca: any) => ca.attributeId);
+      const requiredAttributeIds = (category.categoryAttributes ?? []).filter((ca: any) => ca.isRequired).map((ca: any) => ca.attributeId);
+      for (const attr of attributesArray) {
+        if (!validAttributeIds.includes(attr.attributeId)) {
+          return res.status(400).json({ error: `El atributo ${attr.attributeId} no corresponde a la categoría seleccionada` });
+        }
+      }
+      for (const reqAttrId of requiredAttributeIds) {
+        if (!attributesArray.some(a => a.attributeId === reqAttrId)) {
+          return res.status(400).json({ error: `Falta atributo obligatorio: ${reqAttrId}` });
+        }
+      }
 
+      // 2. Generar el código de la categoría (usando el padre si es subcategoría)
+      let categoryCode = '';
+      if (category.level === 0) {
+        categoryCode = generateCategoryCode(category.name);
+      } else if (category.parent && category.parent.name) {
+        categoryCode = generateCategoryCode(category.parent.name);
+      } else {
+        categoryCode = generateCategoryCode(category.name);
+      }
 
-    // 1. Obtener la categoría para generar el SKU
-    const category = await prisma.category.findUnique({
-      where: { id: categoryId },
-      include: { parent: true }
-    });
+      // 3. Generar SKU y código de barras
+      const sequentialNumber = await getNextSequentialNumber(categoryCode);
+      const generatedSku = `${categoryCode}-${sequentialNumber}`;
+      const generatedBarcode = generatedSku;
 
-    if (!category) {
-      return res.status(400).json({
+      // 4. Crear el producto en la base de datos
+      const newProduct = await prisma.product.create({
+        data: {
+          name,
+          description: description || null,
+          brand: brand || null,
+          costPrice: costPrice ? parseFloat(costPrice) : undefined,
+          salePrice: parseFloat(salePrice),
+          stock: stock ? parseInt(stock) : 0,
+          minStock: minStock ? parseInt(minStock) : 0,
+          maxStock: maxStock ? parseInt(maxStock) : null,
+          status: status || 'ACTIVE',
+          sku: generatedSku,
+          barcode: generatedBarcode,
+          images: imagePaths,
+          datasheetUrl,
+          metadata: parsedMetadata,
+          category: { connect: { id: categoryId } }
+        },
+        include: { category: true }
+      });
+
+      // Guardar atributos dinámicos
+      for (const attr of attributesArray) {
+        await prisma.productAttributeValue.upsert({
+          where: { productId_attributeId: { productId: newProduct.id, attributeId: attr.attributeId } },
+          update: { value: String(attr.value) },
+          create: { productId: newProduct.id, attributeId: attr.attributeId, value: String(attr.value) }
+        });
+      }
+
+      res.status(201).json({
+        success: true,
+        message: 'Producto creado exitosamente',
+        data: newProduct
+      });
+    } catch (error: any) {
+      console.error('Error creando producto:', error);
+      res.status(500).json({
         success: false,
-        error: 'Categoría no encontrada'
+        error: 'Error interno del servidor',
+        message: 'No se pudo crear el producto'
       });
     }
-
-    // 2. Generar el código de la categoría (usando el padre si es subcategoría)
-    let categoryCode = '';
-    if (category.level === 0) {
-      categoryCode = generateCategoryCode(category.name);
-    } else if (category.parent) {
-      categoryCode = generateCategoryCode(category.parent.name);
-    } else {
-      // Fallback por si no tiene padre pero no es nivel 0
-      categoryCode = generateCategoryCode(category.name);
-    }
-
-    // 3. Generar SKU y código de barras
-    const sequentialNumber = await getNextSequentialNumber(categoryCode);
-    const generatedSku = `${categoryCode}-${sequentialNumber}`;
-    const generatedBarcode = generatedSku; // O una lógica diferente si es necesario
-
-    // 4. Crear el producto en la base de datos
-    const newProduct = await prisma.product.create({
-      data: {
-        name,
-        description: description || null,
-        brand: brand || null,
-        costPrice: costPrice ? parseFloat(costPrice) : undefined,
-        salePrice: parseFloat(salePrice),
-        stock: stock ? parseInt(stock) : 0,
-        minStock: minStock ? parseInt(minStock) : 0,
-        maxStock: maxStock ? parseInt(maxStock) : null,
-        status: status || 'ACTIVE',
-        sku: generatedSku,
-        barcode: generatedBarcode,
-        images: imagePaths,
-        datasheetUrl,
-        metadata: parsedMetadata, // Usar los metadatos parseados
-        category: {
-          connect: { id: categoryId }
-        }
-      },
-      include: {
-        category: true
-      }
-    });
-
-    // --- DEPURACIÓN: Log de rutas de imágenes y producto creado ---
-    console.log('--- DEPURACIÓN CREACIÓN PRODUCTO ---');
-    console.log('Imágenes recibidas:', files['images']?.map(f => f.path));
-    console.log('Rutas guardadas en DB (images):', imagePaths);
-    console.log('Producto creado:', {
-      id: newProduct.id,
-      name: newProduct.name,
-      images: newProduct.images,
-      datasheetUrl: newProduct.datasheetUrl
-    });
-    // --- FIN DEPURACIÓN ---
-
-    res.status(201).json({
-      success: true,
-      message: 'Producto creado exitosamente',
-      data: newProduct
-    });
-
-  } catch (error: any) {
-    console.error('Error creando producto:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Error interno del servidor',
-      message: 'No se pudo crear el producto'
-    });
-  }
-});
+  });
 
 // Actualizar producto
 router.put('/:id', 
@@ -374,109 +429,213 @@ router.put('/:id',
   async (req: any, res: any) => {
     try {
       const { id } = req.params;
-      const { existingImages, ...bodyData } = req.body;
+      const { existingImages, attributes, ...bodyData } = req.body;
 
       // 1. Procesar nuevas imágenes y ficha técnica si se subieron
       const files = req.files as { [fieldname: string]: Express.Multer.File[] };
       const newImagePaths: string[] = files['images']?.map(file => `/uploads/${file.filename}`) || [];
       const datasheetFile = files['datasheet']?.[0];
-      const newDatasheetUrl = datasheetFile ? `/uploads/${datasheetFile.filename}` : undefined; // undefined para no sobreescribir si no se sube nueva
+      const newDatasheetUrl = datasheetFile ? `/uploads/${datasheetFile.filename}` : undefined;
 
-
-    // 2. Combinar imágenes existentes (que se conservan) con las nuevas
-    // Siempre obtener un array de strings limpios, sin duplicados ni rutas inválidas
-    let finalImages: string[] = [];
-    if (req.body.images) {
-      if (Array.isArray(req.body.images)) {
-        finalImages = req.body.images;
-      } else if (typeof req.body.images === 'string') {
-        // Si viene como string separado por comas, dividir y limpiar
-        finalImages = req.body.images.split(',').map((s: string) => s.trim());
-      }
-    }
-    // Agregar imágenes nuevas subidas (archivos)
-    finalImages = [...finalImages, ...newImagePaths];
-    // Limpiar: solo rutas relativas válidas, sin vacíos ni duplicados ni strings con varias rutas pegadas
-    finalImages = finalImages
-      .flatMap((img: string) =>
-        typeof img === 'string'
-          ? img.split(',').map((s: string) => s.trim())
-          : []
-      )
-      .filter((img: string) => img && img.startsWith('/uploads/') && !img.includes(' '));
-    finalImages = Array.from(new Set(finalImages));
-
-    // Log de depuración para ver el array final
-    console.log('Imágenes recibidas para update:', req.body.images);
-    console.log('Nuevas imágenes subidas:', newImagePaths);
-    console.log('Imágenes finales guardadas:', finalImages);
-
-    // 3. Preparar los datos para la actualización, convirtiendo tipos si es necesario
-    const updateData: any = { ...bodyData };
-    if (updateData.costPrice) updateData.costPrice = parseFloat(updateData.costPrice);
-    if (updateData.salePrice) updateData.salePrice = parseFloat(updateData.salePrice);
-    if (updateData.stock) updateData.stock = parseInt(updateData.stock);
-    if (updateData.minStock) updateData.minStock = parseInt(updateData.minStock);
-    if (updateData.maxStock) {
-      updateData.maxStock = parseInt(updateData.maxStock);
-    } else if (updateData.maxStock === '' || updateData.maxStock === null) {
-      updateData.maxStock = null;
-    }
-    
-    // Asignar la lista final de imágenes (unificado con create)
-    updateData.images = finalImages;
-
-    // Asignar la nueva ficha técnica solo si se subió una
-    if (newDatasheetUrl) {
-      updateData.datasheetUrl = newDatasheetUrl;
-    }
-
-    // Evitar que se actualice el SKU directamente
-    if (updateData.sku) {
-      delete updateData.sku;
-    }
-
-    // Asegurar que la categoría se conecte correctamente
-    if (updateData.categoryId) {
-      updateData.category = {
-        connect: {
-          id: parseInt(updateData.categoryId)
+      // 2. Combinar imágenes existentes (que se conservan) con las nuevas
+      let finalImages: string[] = [];
+      if (req.body.images) {
+        if (Array.isArray(req.body.images)) {
+          finalImages = req.body.images;
+        } else if (typeof req.body.images === 'string') {
+          finalImages = req.body.images.split(',').map((s: string) => s.trim());
         }
-      };
-      delete updateData.categoryId; // Eliminar para no causar conflicto
-    }
-
-
-    // 4. Actualizar el producto en la base de datos
-    const product = await prisma.product.update({
-      where: { id },
-      data: updateData,
-      include: {
-        category: true
       }
-    });
+      finalImages = [...finalImages, ...newImagePaths];
+      finalImages = finalImages
+        .flatMap((img: string) =>
+          typeof img === 'string'
+            ? img.split(',').map((s: string) => s.trim())
+            : []
+        )
+        .filter((img: string) => img && img.startsWith('/uploads/') && !img.includes(' '));
+      finalImages = Array.from(new Set(finalImages));
 
-    res.json({
-      success: true,
-      message: 'Producto actualizado exitosamente',
-      data: product
-    });
-  } catch (error: any) {
-    console.error('Error actualizando producto:', error);
-    
-    if (error.code === 'P2025') {
-      return res.status(404).json({
+      // 3. Preparar los datos para la actualización
+      const updateData: any = { ...bodyData };
+      if (updateData.costPrice) updateData.costPrice = parseFloat(updateData.costPrice);
+      if (updateData.salePrice) updateData.salePrice = parseFloat(updateData.salePrice);
+      if (updateData.stock) updateData.stock = parseInt(updateData.stock);
+      if (updateData.minStock) updateData.minStock = parseInt(updateData.minStock);
+      if (updateData.maxStock) {
+        updateData.maxStock = parseInt(updateData.maxStock);
+      } else if (updateData.maxStock === '' || updateData.maxStock === null) {
+        updateData.maxStock = null;
+      }
+      updateData.images = finalImages;
+      if (newDatasheetUrl) {
+        updateData.datasheetUrl = newDatasheetUrl;
+      }
+      if (updateData.sku) {
+        delete updateData.sku;
+      }
+      if (updateData.categoryId) {
+        updateData.category = {
+          connect: { id: updateData.categoryId }
+        };
+        delete updateData.categoryId;
+      }
+
+      // Validar y guardar atributos dinámicos
+      let attributesArray: Array<{ attributeId: string, value: string }> = [];
+      if (attributes) {
+        try {
+          attributesArray = typeof attributes === 'string' ? JSON.parse(attributes) : attributes;
+        } catch (e) {
+          return res.status(400).json({ error: 'Formato de atributos inválido' });
+        }
+      }
+      // Validar que los atributos correspondan a la categoría
+      const product = await prisma.product.findUnique({
+        where: { id },
+        include: {
+          category: {
+            include: {
+              categoryAttributes: { include: { attribute: true } },
+              parent: true
+            }
+          }
+        }
+      }) as any;
+      if (!product || !product.category) {
+        return res.status(404).json({ success: false, error: 'Producto no encontrado' });
+      }
+      const validAttributeIds = (product.category.categoryAttributes ?? []).map((ca: any) => ca.attributeId);
+      for (const attr of attributesArray) {
+        if (!validAttributeIds.includes(attr.attributeId)) {
+          return res.status(400).json({ error: `El atributo ${attr.attributeId} no corresponde a la categoría del producto` });
+        }
+      }
+      // Guardar atributos dinámicos
+      for (const attr of attributesArray) {
+        await prisma.productAttributeValue.upsert({
+          where: { productId_attributeId: { productId: id, attributeId: attr.attributeId } },
+          update: { value: String(attr.value) },
+          create: { productId: id, attributeId: attr.attributeId, value: String(attr.value) }
+        });
+      }
+
+      // 4. Actualizar el producto en la base de datos
+      const updatedProduct = await prisma.product.update({
+        where: { id },
+        data: updateData,
+        include: { category: true }
+      });
+
+      res.json({
+        success: true,
+        message: 'Producto actualizado exitosamente',
+        data: updatedProduct
+      });
+    } catch (error: any) {
+      console.error('Error actualizando producto:', error);
+      if (error.code === 'P2025') {
+        return res.status(404).json({
+          success: false,
+          error: 'Producto no encontrado',
+          message: 'El producto especificado no existe'
+        });
+      }
+      res.status(500).json({
         success: false,
-        error: 'Producto no encontrado',
-        message: 'El producto especificado no existe'
+        error: 'Error interno del servidor',
+        message: 'No se pudo actualizar el producto'
       });
     }
+  });
+// Endpoint de importación masiva de productos (Excel/CSV)
+router.post('/import', uploadRateLimit, upload.single('file'), async (req: any, res: any) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Archivo no proporcionado' });
+    }
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    let rows: any[] = [];
+    if (ext === '.xlsx' || ext === '.xls') {
+      const workbook = xlsx.readFile(req.file.path);
+      const sheetName = workbook.SheetNames[0];
+      rows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+    } else if (ext === '.csv') {
+      const content = fs.readFileSync(req.file.path, 'utf8');
+      rows = csvParse(content, { columns: true, skip_empty_lines: true });
+    } else {
+      return res.status(400).json({ error: 'Formato de archivo no soportado. Usa .xlsx, .xls o .csv' });
+    }
 
-    res.status(500).json({
-      success: false,
-      error: 'Error interno del servidor',
-      message: 'No se pudo actualizar el producto'
-    });
+    const results: any[] = [];
+    for (const [i, row] of rows.entries()) {
+      try {
+        // Extraer datos básicos y atributos dinámicos
+        const { sku, name, description, brand, costPrice, salePrice, stock, minStock, maxStock, status, categoryId, ...attrCols } = row;
+        if (!name || !categoryId || !salePrice) {
+          throw new Error('Faltan campos obligatorios (name, categoryId, salePrice)');
+        }
+        // Validar categoría y atributos
+        const category = await prisma.category.findUnique({
+          where: { id: categoryId },
+        include: { categoryAttributes: { include: { attribute: true } }, parent: true }
+        });
+        if (!category) throw new Error('Categoría no encontrada');
+        const validAttributeIds = (category.categoryAttributes ?? []).map((ca: any) => ca.attributeId);
+        const attributesArray = Object.entries(attrCols)
+          .filter(([key]) => validAttributeIds.includes(key))
+          .map(([attributeId, value]) => ({ attributeId, value }));
+        // Crear o actualizar producto por SKU
+        let product = null;
+        if (sku) {
+          product = await prisma.product.upsert({
+            where: { sku },
+            update: {
+              name, description, brand, costPrice: costPrice ? parseFloat(costPrice) : undefined,
+              salePrice: parseFloat(salePrice), stock: stock ? parseInt(stock) : 0,
+              minStock: minStock ? parseInt(minStock) : 0, maxStock: maxStock ? parseInt(maxStock) : null,
+              status: status || 'ACTIVE', category: { connect: { id: categoryId } }
+            },
+            create: {
+              sku, name, description, brand, costPrice: costPrice ? parseFloat(costPrice) : undefined,
+              salePrice: parseFloat(salePrice), stock: stock ? parseInt(stock) : 0,
+              minStock: minStock ? parseInt(minStock) : 0, maxStock: maxStock ? parseInt(maxStock) : null,
+              status: status || 'ACTIVE', category: { connect: { id: categoryId } }
+            },
+            include: { category: true }
+          });
+        } else {
+          // Si no hay SKU, crear uno automático
+          const categoryCode = generateCategoryCode(category.name);
+          const sequentialNumber = await getNextSequentialNumber(categoryCode);
+          const generatedSku = `${categoryCode}-${sequentialNumber}`;
+          product = await prisma.product.create({
+            data: {
+              sku: generatedSku, name, description, brand, costPrice: costPrice ? parseFloat(costPrice) : undefined,
+              salePrice: parseFloat(salePrice), stock: stock ? parseInt(stock) : 0,
+              minStock: minStock ? parseInt(minStock) : 0, maxStock: maxStock ? parseInt(maxStock) : null,
+              status: status || 'ACTIVE', category: { connect: { id: categoryId } }
+            },
+            include: { category: true }
+          });
+        }
+        // Guardar atributos dinámicos
+        for (const attr of attributesArray) {
+          await prisma.productAttributeValue.upsert({
+            where: { productId_attributeId: { productId: product.id, attributeId: attr.attributeId } },
+            update: { value: String(attr.value) },
+            create: { productId: product.id, attributeId: attr.attributeId, value: String(attr.value) }
+          });
+        }
+        results.push({ row: i + 1, sku: product.sku, status: 'ok' });
+      } catch (err: any) {
+        results.push({ row: i + 1, error: err.message });
+      }
+    }
+    res.json({ success: true, results });
+  } catch (error) {
+    console.error('Error en importación masiva:', error);
+    res.status(500).json({ error: 'Error interno en importación masiva' });
   }
 });
 
@@ -502,6 +661,51 @@ router.delete('/:id', async (req: any, res: any) => {
       error: 'Error interno del servidor',
       message: 'No se pudo eliminar el producto'
     });
+  }
+});
+
+// Obtener atributos y valores posibles para filtros dinámicos por categoría
+router.get('/attributes', async (req, res) => {
+  try {
+    const { categoryId } = req.query;
+    if (!categoryId) {
+      return res.status(400).json({ error: 'categoryId es requerido' });
+    }
+
+    // 1. Obtener los atributos de la categoría
+    const categoryAttributes = await prisma.categoryAttribute.findMany({
+      where: { categoryId: String(categoryId) },
+      include: { attribute: true }
+    });
+
+    // 2. Para cada atributo, obtener los valores distintos usados en productos de esa categoría
+    const attributesWithValues = await Promise.all(
+      (categoryAttributes as any[]).map(async (catAttr) => {
+        const values = await prisma.productAttributeValue.findMany({
+          where: {
+            attributeId: catAttr.attributeId,
+            product: { categoryId: String(categoryId) }
+          },
+          select: { value: true },
+          distinct: ['value']
+        });
+        return {
+          attributeId: catAttr.attributeId,
+          name: catAttr.attribute.name,
+          type: catAttr.attribute.type,
+          isRequired: catAttr.isRequired,
+          values: (values as any[]).map((v: any) => v.value)
+        };
+      })
+    );
+
+    res.json({
+      categoryId,
+      attributes: attributesWithValues
+    });
+  } catch (error) {
+    console.error('Error obteniendo atributos de categoría:', error);
+    res.status(500).json({ error: 'Error interno al obtener atributos' });
   }
 });
 

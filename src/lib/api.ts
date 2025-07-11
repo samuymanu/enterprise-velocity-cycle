@@ -111,6 +111,10 @@ export const apiService = {
       return apiRequest(`/products/${id}`, {
         method: 'DELETE'
       });
+    },
+
+    getAttributesByCategory: async (categoryId: string) => {
+      return apiRequest(`/products/attributes?categoryId=${categoryId}`);
     }
   },
 

@@ -95,12 +95,14 @@ export default function Workshop() {
         <Card className="enterprise-card p-6">
           <div className="flex flex-col md:flex-row gap-4">
             <input 
+              id="workshop-search"
+              name="workshop-search"
               type="text" 
               placeholder="Buscar por orden, cliente o vehículo..."
               className="enterprise-input flex-1"
             />
             <div className="flex gap-2">
-              <select className="enterprise-input">
+              <select id="workshop-status" name="workshop-status" className="enterprise-input">
                 <option>Todos los estados</option>
                 <option>Recibidas</option>
                 <option>En progreso</option>
@@ -108,13 +110,13 @@ export default function Workshop() {
                 <option>Completadas</option>
                 <option>Entregadas</option>
               </select>
-              <select className="enterprise-input">
+              <select id="workshop-technician" name="workshop-technician" className="enterprise-input">
                 <option>Todos los técnicos</option>
                 <option>Carlos Méndez</option>
                 <option>Roberto García</option>
                 <option>Ana Morales</option>
               </select>
-              <select className="enterprise-input">
+              <select id="workshop-priority" name="workshop-priority" className="enterprise-input">
                 <option>Todas las prioridades</option>
                 <option>Urgente</option>
                 <option>Alta</option>

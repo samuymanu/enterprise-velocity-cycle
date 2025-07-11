@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +38,12 @@ export function AddProductModal({ isOpen, onClose, onProductAdded, categories }:
     minStock: ''
   });
 
+  // Atributos dinámicos
+  const [attributes, setAttributes] = useState<any[]>([]);
+  const [attributeValues, setAttributeValues] = useState<Record<string, any>>({});
+  const [attrLoading, setAttrLoading] = useState(false);
+  const [attrErrors, setAttrErrors] = useState<Record<string, string>>({});
+
   // Manejar selección de imágenes
   const handleImagesChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -64,26 +71,74 @@ export function AddProductModal({ isOpen, onClose, onProductAdded, categories }:
   }, [isOpen, categories]);
 
   // Función para cargar subcategorías
-  const handleParentCategoryChange = (parentId: string) => {
+  const handleParentCategoryChange = async (parentId: string) => {
     setSelectedParentCategory(parentId);
-    
     // Filtrar subcategorías de la categoría principal seleccionada
     const filteredSubCategories = categories.filter((cat: any) => cat.parentId === parentId);
     setSubCategories(filteredSubCategories);
-    
     // Resetear subcategoría seleccionada
     setNewProduct(prev => ({
       ...prev,
       parentCategoryId: parentId,
       subCategoryId: ''
     }));
+    // Limpiar atributos
+    setAttributes([]);
+    setAttributeValues({});
+    setAttrErrors({});
+    // Cargar atributos dinámicos de la categoría principal
+    if (parentId) {
+      setAttrLoading(true);
+      try {
+        const data = await apiService.products.getAttributesByCategory(parentId);
+        setAttributes(data.attributes || []);
+      } catch {
+        setAttributes([]);
+      } finally {
+        setAttrLoading(false);
+      }
+    }
   };
+
+  // Cargar atributos al seleccionar subcategoría
+  useEffect(() => {
+    const loadAttrs = async () => {
+      const catId = newProduct.subCategoryId || newProduct.parentCategoryId;
+      if (!catId) {
+        setAttributes([]);
+        setAttributeValues({});
+        setAttrErrors({});
+        return;
+      }
+      setAttrLoading(true);
+      try {
+        const data = await apiService.products.getAttributesByCategory(catId);
+        setAttributes(data.attributes || []);
+      } catch {
+        setAttributes([]);
+      } finally {
+        setAttrLoading(false);
+      }
+    };
+    loadAttrs();
+  }, [newProduct.subCategoryId]);
 
   // Función para manejar envío del formulario
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-
+    // Validar atributos requeridos
+    const errors: Record<string, string> = {};
+    for (const attr of attributes) {
+      if (attr.isRequired && (attributeValues[attr.attributeId] === undefined || attributeValues[attr.attributeId] === '' || attributeValues[attr.attributeId] === null)) {
+        errors[attr.attributeId] = 'Este campo es obligatorio';
+      }
+    }
+    setAttrErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      setIsSubmitting(false);
+      return;
+    }
     try {
       // Determinar la categoría final (subcategoría si existe, sino la principal)
       const finalCategoryId = newProduct.subCategoryId || newProduct.parentCategoryId;
@@ -92,7 +147,6 @@ export function AddProductModal({ isOpen, onClose, onProductAdded, categories }:
         setIsSubmitting(false);
         return;
       }
-
       // Construir FormData
       const formData = new FormData();
       formData.append('name', newProduct.name);
@@ -107,18 +161,19 @@ export function AddProductModal({ isOpen, onClose, onProductAdded, categories }:
       selectedImages.forEach((file) => {
         formData.append('images', file);
       });
-
+      // Atributos dinámicos
+      formData.append('attributes', JSON.stringify(
+        attributes.map(attr => ({ attributeId: attr.attributeId, value: attributeValues[attr.attributeId] ?? '' }))
+      ));
       // Enviar a backend
       const response = await fetch('http://localhost:3001/api/products', {
         method: 'POST',
         body: formData
       });
-
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || 'Error creando producto');
       }
-
       // Resetear formulario y cerrar modal
       setNewProduct({
         name: '',
@@ -135,6 +190,9 @@ export function AddProductModal({ isOpen, onClose, onProductAdded, categories }:
       setSubCategories([]);
       setSelectedImages([]);
       setImagePreviews([]);
+      setAttributes([]);
+      setAttributeValues({});
+      setAttrErrors({});
       if (fileInputRef.current) fileInputRef.current.value = '';
       onClose();
       onProductAdded();
@@ -164,6 +222,70 @@ export function AddProductModal({ isOpen, onClose, onProductAdded, categories }:
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Inputs dinámicos de atributos */}
+          {attrLoading && <div className="text-xs text-muted-foreground">Cargando atributos...</div>}
+          {attributes.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {attributes.map(attr => (
+                <div key={attr.attributeId} className="flex flex-col">
+                  <Label className="mb-1 font-medium text-sm">{attr.name}{attr.isRequired && <span className="text-destructive">*</span>}</Label>
+                  {attr.type === 'STRING' && (
+                    <Input
+                      id={`attr-${attr.attributeId}`}
+                      name={`attr-${attr.attributeId}`}
+                      value={attributeValues[attr.attributeId] || ''}
+                      onChange={e => setAttributeValues(v => ({ ...v, [attr.attributeId]: e.target.value }))}
+                      placeholder={`Ingrese ${attr.name}`}
+                    />
+                  )}
+                  {attr.type === 'NUMBER' && (
+                    <Input
+                      id={`attr-${attr.attributeId}`}
+                      name={`attr-${attr.attributeId}`}
+                      type="number"
+                      value={attributeValues[attr.attributeId] || ''}
+                      onChange={e => setAttributeValues(v => ({ ...v, [attr.attributeId]: e.target.value }))}
+                      placeholder={`Ingrese ${attr.name}`}
+                    />
+                  )}
+                  {attr.type === 'BOOLEAN' && (
+                    <Switch
+                      checked={!!attributeValues[attr.attributeId]}
+                      onCheckedChange={val => setAttributeValues(v => ({ ...v, [attr.attributeId]: val }))}
+                    />
+                  )}
+                  {attr.type === 'LIST' && (
+                    <Select
+                      value={attributeValues[attr.attributeId] || ''}
+                      onValueChange={val => setAttributeValues(v => ({ ...v, [attr.attributeId]: val }))}
+                    >
+                      <SelectTrigger id={`attr-${attr.attributeId}-trigger`} name={`attr-${attr.attributeId}-trigger`}>
+                        <SelectValue placeholder={`Seleccionar ${attr.name}`} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">Todos</SelectItem>
+                        {attr.values.map((val: string) => (
+                          <SelectItem key={val} value={val}>{val}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  {attr.type === 'DATE' && (
+                    <Input
+                      id={`attr-${attr.attributeId}`}
+                      name={`attr-${attr.attributeId}`}
+                      type="date"
+                      value={attributeValues[attr.attributeId] || ''}
+                      onChange={e => setAttributeValues(v => ({ ...v, [attr.attributeId]: e.target.value }))}
+                    />
+                  )}
+                  {attrErrors[attr.attributeId] && (
+                    <span className="text-xs text-destructive">{attrErrors[attr.attributeId]}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           {/* Campo de imágenes múltiples */}
           <div>
             <Label htmlFor="images">Imágenes del Producto</Label>

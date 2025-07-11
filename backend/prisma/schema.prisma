@@ -1,7 +1,7 @@
 // ===== MARCAS =====
 model Brand {
-  id        String    @id @default(cuid())
-  name      String    @unique
+  id      String    @id @default(cuid())
+  name    String    @unique
   products  Product[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -10,11 +10,11 @@ model Brand {
 }
 // ===== TOKENS DE REFRESCO Y BLACKLIST =====
 model RefreshToken {
-  id         String   @id @default(cuid())
-  token      String   @unique
+  id       String   @id @default(cuid())
+  token    String   @unique
   userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  ip         String?
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ip       String?
   userAgent  String?
   revoked    Boolean  @default(false)
   expiresAt  DateTime
@@ -52,8 +52,8 @@ model User {
   updatedAt DateTime @updatedAt
 
   // Relaciones
-  sales          Sale[]
-  serviceOrders  ServiceOrder[]
+  sales         Sale[]
+  serviceOrders ServiceOrder[]
   inventoryMoves InventoryMove[]
   refreshTokens  RefreshToken[]
 
@@ -91,7 +91,7 @@ model Customer {
   updatedAt      DateTime    @updatedAt
 
   // Relaciones
-  sales         Sale[]
+  sales          Sale[]
   serviceOrders ServiceOrder[]
 
   @@map("customers")
@@ -134,28 +134,28 @@ model Category {
 
 
 model Product {
-  id          String      @id @default(cuid())
-  sku         String      @unique
-  name        String
-  description String?
-  brandId     String?
-  brand       Brand?    @relation(fields: [brandId], references: [id])
-  costPrice   Float    @default(0)
-  salePrice   Float
-  stock       Int      @default(0)
-  minStock    Int      @default(10)
-  maxStock    Int?
-  barcode     String?
-  status      String   @default("ACTIVE") // ACTIVE, INACTIVE, DISCONTINUED
-  images      String[]
-  tags        String[]
+  id           String      @id @default(cuid())
+  sku          String      @unique
+  name         String
+  description  String?
+  brandId      String?
+  brand        Brand?    @relation(fields: [brandId], references: [id])
+  costPrice    Float    @default(0)
+  salePrice    Float
+  stock        Int      @default(0)
+  minStock     Int      @default(10)
+  maxStock     Int?
+  barcode      String?
+  status       String   @default("ACTIVE") // ACTIVE, INACTIVE, DISCONTINUED
+  images       String[]
+  tags         String[]
 
   datasheetUrl String? // Nuevo campo para la ficha técnica
   metadata     Json?   // Nuevo campo para metadatos flexibles
 
   categoryId  String?
   category    Category? @relation(fields: [categoryId], references: [id])
-  saleItems   SaleItem[]
+  saleItems    SaleItem[]
   inventoryMoves InventoryMove[]
   serviceOrderItems ServiceOrderItem[]
   attributeValues ProductAttributeValue[]
@@ -171,13 +171,13 @@ enum ProductStatus {
 
 // ===== MOVIMIENTOS DE INVENTARIO =====
 model InventoryMove {
-  id        String            @id @default(cuid())
-  productId String
-  type      InventoryMoveType
-  quantity  Int
-  reason    String?
-  userId    String
-  createdAt DateTime          @default(now())
+  id          String          @id @default(cuid())
+  productId   String
+  type        InventoryMoveType
+  quantity    Int
+  reason      String?
+  userId      String
+  createdAt   DateTime        @default(now())
 
   // Relaciones
   product Product @relation(fields: [productId], references: [id])
@@ -195,23 +195,23 @@ enum InventoryMoveType {
 
 // ===== VENTAS =====
 model Sale {
-  id            String     @id @default(cuid())
-  saleNumber    String     @unique
+  id            String      @id @default(cuid())
+  saleNumber    String      @unique
   customerId    String
   userId        String
-  subtotal      Decimal    @db.Decimal(10, 2)
-  tax           Decimal    @db.Decimal(10, 2)
-  discount      Decimal    @default(0) @db.Decimal(10, 2)
-  total         Decimal    @db.Decimal(10, 2)
+  subtotal      Decimal     @db.Decimal(10, 2)
+  tax           Decimal     @db.Decimal(10, 2)
+  discount      Decimal     @default(0) @db.Decimal(10, 2)
+  total         Decimal     @db.Decimal(10, 2)
   paymentMethod PaymentMethod
   status        SaleStatus @default(COMPLETED)
   notes         String?
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 
   // Relaciones
-  customer  Customer   @relation(fields: [customerId], references: [id])
-  user      User       @relation(fields: [userId], references: [id])
+  customer  Customer    @relation(fields: [customerId], references: [id])
+  user      User        @relation(fields: [userId], references: [id])
   saleItems SaleItem[]
 
   @@map("sales")
@@ -249,8 +249,8 @@ enum SaleStatus {
 
 // ===== TALLER DE SERVICIOS =====
 model ServiceOrder {
-  id                String               @id @default(cuid())
-  orderNumber       String               @unique
+  id                String              @id @default(cuid())
+  orderNumber       String              @unique
   customerId        String
   technicianId      String
   vehicleType       String
@@ -261,33 +261,33 @@ model ServiceOrder {
   problemDescription String
   diagnosis         String?
   solution          String?
-  laborCost         Decimal              @default(0) @db.Decimal(10, 2)
-  partsCost         Decimal              @default(0) @db.Decimal(10, 2)
-  totalCost         Decimal              @default(0) @db.Decimal(10, 2)
-  status            ServiceOrderStatus   @default(RECEIVED)
+  laborCost         Decimal             @default(0) @db.Decimal(10, 2)
+  partsCost         Decimal             @default(0) @db.Decimal(10, 2)
+  totalCost         Decimal             @default(0) @db.Decimal(10, 2)
+  status            ServiceOrderStatus  @default(RECEIVED)
   priority          ServiceOrderPriority @default(NORMAL)
   estimatedDate     DateTime?
   completedDate     DateTime?
   deliveredDate     DateTime?
   notes             String?
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
 
   // Relaciones
-  customer    Customer           @relation(fields: [customerId], references: [id])
-  technician  User               @relation(fields: [technicianId], references: [id])
+  customer    Customer            @relation(fields: [customerId], references: [id])
+  technician  User                @relation(fields: [technicianId], references: [id])
   serviceItems ServiceOrderItem[]
 
   @@map("service_orders")
 }
 
 model ServiceOrderItem {
-  id        String  @id @default(cuid())
+  id             String  @id @default(cuid())
   serviceOrderId String
-  productId String
-  quantity  Int
-  unitPrice Decimal @db.Decimal(10, 2)
-  total     Decimal @db.Decimal(10, 2)
+  productId      String
+  quantity       Int
+  unitPrice      Decimal @db.Decimal(10, 2)
+  total          Decimal @db.Decimal(10, 2)
 
   // Relaciones
   serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
@@ -314,15 +314,15 @@ enum ServiceOrderPriority {
 
 // ===== SISTEMA DE ATRIBUTOS DINÁMICOS =====
 model Attribute {
-  id          String      @id @default(cuid())
-  name        String      @unique // ej: "Tamaño de rueda", "Color", "Material"
-  type        AttributeType
-  unit        String?     // opcional, ej: "cm", "kg"
-  options     String[]    // array de strings, solo si type = LIST
-  description String?
-  isActive    Boolean     @default(true)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  id           String      @id @default(cuid())
+  name         String      @unique // ej: "Tamaño de rueda", "Color", "Material"
+  type         AttributeType
+  unit         String?     // opcional, ej: "cm", "kg"
+  options      String[]    // array de strings, solo si type = LIST
+  description  String?
+  isActive     Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
 
   // Relaciones
   categoryAttributes CategoryAttribute[]
@@ -373,12 +373,12 @@ model ProductAttributeValue {
 
 // ===== CONFIGURACIONES DEL SISTEMA =====
 model SystemConfig {
-  id    String @id @default(cuid())
-  key   String @unique
-  value String
+  id          String @id @default(cuid())
+  key         String @unique
+  value       String
   description String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@map("system_config")
 }

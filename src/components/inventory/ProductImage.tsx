@@ -25,8 +25,11 @@ const ProductImage = ({ src, alt }: ProductImageProps) => {
 
   if (hasError || !imageSrc) {
     return (
-      <div className="w-12 h-12 flex items-center justify-center bg-muted rounded border border-border text-muted-foreground text-xl" title="Imagen no disponible">
-        🖼️
+      <div className="w-12 h-12 flex flex-col items-center justify-center bg-muted rounded border border-border text-muted-foreground text-xs text-center break-all" title="Imagen no disponible">
+        <span className="text-xl">🖼️</span>
+        {src && (
+          <span className="block mt-1 max-w-[44px] overflow-hidden text-ellipsis" style={{fontSize:'8px'}}>{src}</span>
+        )}
       </div>
     );
   }
@@ -38,6 +41,7 @@ const ProductImage = ({ src, alt }: ProductImageProps) => {
       className="w-12 h-12 object-cover rounded border border-border bg-white"
       onError={handleError}
       title={`${alt}\n${src}`}
+      loading="lazy"
     />
   );
 };

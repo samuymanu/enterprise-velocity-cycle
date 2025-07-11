@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
+import jwt, { Secret } from 'jsonwebtoken';
 import crypto from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import { getEnvConfig, getJwtConfig } from '../config/env';
@@ -16,6 +16,7 @@ const router = express.Router();
 const prisma = new PrismaClient();
 const env = getEnvConfig();
 const jwtConfig = getJwtConfig();
+const jwtSecret: Secret = jwtConfig.secret as Secret;
 
 // Registro de usuario (solo admin puede crear usuarios)
 router.post('/register', 
@@ -111,10 +112,12 @@ router.post('/login',
         });
       }
       // Generar access token
+      // Forzar expiresIn a número de segundos (por ejemplo, 86400 para 1 día)
+      const expiresIn: number = 86400; // 1 día
       const token = jwt.sign(
         { userId: user.id },
-        jwtConfig.secret ?? '',
-        { expiresIn: String(jwtConfig.expiresIn) }
+        jwtSecret,
+        { expiresIn }
       );
       // Generar refresh token seguro
       const refreshToken = crypto.randomBytes(64).toString('hex');
@@ -167,10 +170,12 @@ router.post('/refresh', async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Usuario no válido' });
     }
     // Generar nuevo access token
+    // Forzar expiresIn a número de segundos (por ejemplo, 86400 para 1 día)
+    const expiresIn: number = 86400; // 1 día
     const token = jwt.sign(
       { userId: user.id },
-      jwtConfig.secret ?? '',
-      { expiresIn: String(jwtConfig.expiresIn) }
+      jwtSecret,
+      { expiresIn }
     );
     // Opcional: rotar refresh token
     const newRefreshToken = crypto.randomBytes(64).toString('hex');
