@@ -197,8 +197,14 @@ export function EditProductModal({ isOpen, onClose, product, categories, onProdu
           {attributes.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {attributes.map(attr => (
-                <div key={attr.attributeId} className="flex flex-col">
-                  <Label className="mb-1 font-medium text-sm">{attr.name}{attr.isRequired && <span className="text-destructive">*</span>}</Label>
+                <div key={attr.attributeId} className="flex flex-col border rounded p-2 mb-2 bg-background/50">
+                  <Label className="mb-1 font-medium text-sm flex items-center gap-2">
+                    {attr.name}{attr.isRequired && <span className="text-destructive">*</span>}
+                    {attr.unit && <span className="text-xs text-muted-foreground">({attr.unit})</span>}
+                    {attr.isGlobal && <span className="text-xs bg-primary/10 px-2 py-1 rounded">Global</span>}
+                  </Label>
+                  {attr.helpText && <span className="text-xs text-muted-foreground mb-1">{attr.helpText}</span>}
+                  {attr.dependsOn && <span className="text-xs text-warning mb-1">Depende de: {attr.dependsOn}</span>}
                   {attr.type === 'STRING' && (
                     <Input
                       id={`attr-${attr.attributeId}`}
@@ -249,8 +255,22 @@ export function EditProductModal({ isOpen, onClose, product, categories, onProdu
                       onChange={e => setAttributeValues(v => ({ ...v, [attr.attributeId]: e.target.value }))}
                     />
                   )}
+                  {/* Mostrar reglas avanzadas */}
+                  {attr.type === 'NUMBER' && (attr.minValue !== null || attr.maxValue !== null) && (
+                    <span className="text-xs text-muted-foreground mt-1">
+                      {attr.minValue !== null && `Mín: ${attr.minValue} `}
+                      {attr.maxValue !== null && `Máx: ${attr.maxValue}`}
+                    </span>
+                  )}
+                  {attr.type === 'STRING' && attr.regex && (
+                    <span className="text-xs text-muted-foreground mt-1">Regex: {attr.regex}</span>
+                  )}
                   {attrErrors[attr.attributeId] && (
                     <span className="text-xs text-destructive">{attrErrors[attr.attributeId]}</span>
+                  )}
+                  {/* Mostrar error general del backend */}
+                  {attrErrors.general && (
+                    <span className="text-xs text-destructive">{attrErrors.general}</span>
                   )}
                 </div>
               ))}

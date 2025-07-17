@@ -318,6 +318,12 @@ model Attribute {
   name         String      @unique // ej: "Tamaño de rueda", "Color", "Material"
   type         AttributeType
   unit         String?     // opcional, ej: "cm", "kg"
+  helpText     String?     // ayuda contextual para el usuario
+  isGlobal     Boolean     @default(false) // si el atributo es global para todos los productos
+  dependsOn    String?     // id de atributo del que depende
+  minValue     Float?      // para NUMBER
+  maxValue     Float?      // para NUMBER
+  regex        String?     // para STRING, validación por expresión regular
   options      String[]    // array de strings, solo si type = LIST
   description  String?
   isActive     Boolean     @default(true)

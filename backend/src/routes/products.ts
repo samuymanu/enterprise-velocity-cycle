@@ -351,6 +351,36 @@ router.post('/',
         if (!validAttributeIds.includes(attr.attributeId)) {
           return res.status(400).json({ error: `El atributo ${attr.attributeId} no corresponde a la categoría seleccionada` });
         }
+        // Validación avanzada: tipo, rango, regex, dependencias
+        const catAttr = category.categoryAttributes.find((ca: any) => ca.attributeId === attr.attributeId);
+        const attribute = catAttr?.attribute;
+        if (!attribute) continue;
+        // Validar tipo
+        if (attribute.type === 'NUMBER') {
+          const valNum = Number(attr.value);
+          if (isNaN(valNum)) {
+            return res.status(400).json({ error: `El atributo ${attribute.name} debe ser numérico` });
+          }
+          if (attribute.minValue !== null && valNum < attribute.minValue) {
+            return res.status(400).json({ error: `El valor de ${attribute.name} debe ser mayor o igual a ${attribute.minValue}` });
+          }
+          if (attribute.maxValue !== null && valNum > attribute.maxValue) {
+            return res.status(400).json({ error: `El valor de ${attribute.name} debe ser menor o igual a ${attribute.maxValue}` });
+          }
+        }
+        if (attribute.type === 'STRING' && attribute.regex) {
+          const re = new RegExp(attribute.regex);
+          if (!re.test(attr.value)) {
+            return res.status(400).json({ error: `El valor de ${attribute.name} no cumple el formato requerido` });
+          }
+        }
+        if (attribute.dependsOn) {
+          // Si depende de otro atributo, validar que esté presente y/o su valor
+          const depAttr = attributesArray.find(a => a.attributeId === attribute.dependsOn);
+          if (!depAttr) {
+            return res.status(400).json({ error: `El atributo ${attribute.name} depende de ${attribute.dependsOn}, que no está presente` });
+          }
+        }
       }
       for (const reqAttrId of requiredAttributeIds) {
         if (!attributesArray.some(a => a.attributeId === reqAttrId)) {

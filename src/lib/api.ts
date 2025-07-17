@@ -72,6 +72,12 @@ export const apiService = {
 
   // Productos
   products: {
+    update: async (id: string, productData: FormData) => {
+      return apiRequest(`/products/${id}`, {
+        method: 'PUT',
+        body: productData
+      });
+    },
     getAll: async (params: {
       page?: number;
       limit?: number;
@@ -100,16 +106,25 @@ export const apiService = {
       });
     },
 
-    update: async (id: string, productData: FormData) => {
-      return apiRequest(`/products/${id}`, {
-        method: 'PUT',
-        body: productData
-      });
-    },
-
-    delete: async (id: string) => {
-      return apiRequest(`/products/${id}`, {
-        method: 'DELETE'
+    createAttribute: async (attributeData: {
+      categoryId: string;
+      name: string;
+      type: string;
+      isRequired: boolean;
+      values?: string[];
+      unit?: string;
+      helpText?: string;
+      isGlobal?: boolean;
+      dependsOn?: string;
+      minValue?: number;
+      maxValue?: number;
+      regex?: string;
+      description?: string;
+    }) => {
+      return apiRequest('/attributes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(attributeData)
       });
     },
 

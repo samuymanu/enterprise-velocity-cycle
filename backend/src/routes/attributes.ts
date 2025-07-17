@@ -44,7 +44,7 @@ router.get('/', async (req, res) => {
 // POST /api/attributes - Crear nuevo atributo
 router.post('/', async (req, res) => {
   try {
-    const { name, type, unit, options, description, isActive = true } = req.body;
+    const { name, type, unit, helpText, isGlobal, dependsOn, minValue, maxValue, regex, options, description, isActive = true } = req.body;
 
     // Validaciones
     if (!name || !type) {
@@ -75,9 +75,14 @@ router.post('/', async (req, res) => {
       data: {
         name,
         type,
-        unit: unit || null,
+        unit: unit || undefined,
+        isGlobal: !!isGlobal,
+        dependsOn: dependsOn || undefined,
+        minValue: minValue !== undefined ? Number(minValue) : undefined,
+        maxValue: maxValue !== undefined ? Number(maxValue) : undefined,
+        regex: regex || undefined,
         options: type === 'LIST' ? options : [],
-        description: description || null,
+        description: description || undefined,
         isActive
       }
     });

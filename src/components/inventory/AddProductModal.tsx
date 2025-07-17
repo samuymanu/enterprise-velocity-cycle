@@ -44,6 +44,22 @@ export function AddProductModal({ isOpen, onClose, onProductAdded, categories }:
   const [attrLoading, setAttrLoading] = useState(false);
   const [attrErrors, setAttrErrors] = useState<Record<string, string>>({});
 
+  // Estado para modal de atributo personalizado
+  const [isAttrModalOpen, setIsAttrModalOpen] = useState(false);
+  const [newAttribute, setNewAttribute] = useState({
+    name: '',
+    type: 'STRING',
+    isRequired: false,
+    values: '',
+    unit: '',
+    helpText: '',
+    isGlobal: false,
+    dependsOn: '',
+    minValue: '',
+    maxValue: '',
+    regex: '',
+  });
+  const [attrModalError, setAttrModalError] = useState('');
   // Manejar selección de imágenes
   const handleImagesChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -221,9 +237,165 @@ export function AddProductModal({ isOpen, onClose, onProductAdded, categories }:
           </p>
         </div>
 
+        {/* Botón para agregar atributo personalizado */}
+        <div className="flex justify-end mb-2">
+          <Button type="button" variant="secondary" onClick={() => setIsAttrModalOpen(true)}>
+            + Agregar atributo personalizado
+          </Button>
+        </div>
+
+        {/* Modal para crear atributo personalizado */}
+        <Dialog open={isAttrModalOpen} onOpenChange={setIsAttrModalOpen}>
+          <DialogContent className="max-w-md max-h-[95vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle>Nuevo atributo personalizado</DialogTitle>
+              <DialogDescription>Define el nombre, tipo y si es requerido. Si es lista, separa los valores por coma.</DialogDescription>
+            </DialogHeader>
+            <div className="flex-1 overflow-y-auto">
+              <form
+                onSubmit={async (e) => {
+                e.preventDefault();
+                setAttrModalError('');
+                if (!newAttribute.name.trim()) {
+                  setAttrModalError('El nombre es obligatorio');
+                  return;
+                }
+                if (newAttribute.type === 'LIST' && !newAttribute.values.trim()) {
+                  setAttrModalError('Debes ingresar valores para la lista');
+                  return;
+                }
+                try {
+                  const catId = newProduct.subCategoryId || newProduct.parentCategoryId;
+                  if (!catId) {
+                    setAttrModalError('Selecciona una categoría primero');
+                    return;
+                  }
+                  // Llamada al backend para crear el atributo
+                  const res = await apiService.products.createAttribute({
+                    categoryId: catId,
+                    name: newAttribute.name,
+                    type: newAttribute.type,
+                    isRequired: newAttribute.isRequired,
+                    values: newAttribute.type === 'LIST' ? newAttribute.values.split(',').map(v => v.trim()) : undefined,
+                    unit: newAttribute.unit || undefined,
+                    helpText: newAttribute.helpText || undefined,
+                    isGlobal: newAttribute.isGlobal,
+                    dependsOn: newAttribute.dependsOn || undefined,
+                    minValue: newAttribute.type === 'NUMBER' && newAttribute.minValue !== '' ? Number(newAttribute.minValue) : undefined,
+                    maxValue: newAttribute.type === 'NUMBER' && newAttribute.maxValue !== '' ? Number(newAttribute.maxValue) : undefined,
+                    regex: newAttribute.type === 'STRING' && newAttribute.regex ? newAttribute.regex : undefined,
+                  } as {
+                    categoryId: string;
+                    name: string;
+                    type: string;
+                    isRequired: boolean;
+                    values?: string[];
+                    unit?: string;
+                    helpText?: string;
+                    isGlobal?: boolean;
+                    dependsOn?: string;
+                    minValue?: number;
+                    maxValue?: number;
+                    regex?: string;
+                  });
+                  if (res.error) throw new Error(res.error);
+                  // Recargar atributos
+                  const data = await apiService.products.getAttributesByCategory(catId);
+                  setAttributes(data.attributes || []);
+                  setIsAttrModalOpen(false);
+                  setNewAttribute({
+                    name: '',
+                    type: 'STRING',
+                    isRequired: false,
+                    values: '',
+                    unit: '',
+                    helpText: '',
+                    isGlobal: false,
+                    dependsOn: '',
+                    minValue: '',
+                    maxValue: '',
+                    regex: '',
+                  });
+                } catch (err: any) {
+                  setAttrModalError(err.message || 'Error creando atributo');
+                }
+              }}
+              className="space-y-3"
+            >
+              <div>
+                <Label>Nombre</Label>
+                <Input value={newAttribute.name} onChange={e => setNewAttribute(a => ({ ...a, name: e.target.value }))} required />
+              </div>
+              <div>
+                <Label>Tipo</Label>
+                <Select value={newAttribute.type} onValueChange={val => setNewAttribute(a => ({ ...a, type: val }))}>
+                  <SelectTrigger><SelectValue placeholder="Tipo" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="STRING">Texto</SelectItem>
+                    <SelectItem value="NUMBER">Número</SelectItem>
+                    <SelectItem value="BOOLEAN">Booleano</SelectItem>
+                    <SelectItem value="LIST">Lista</SelectItem>
+                    <SelectItem value="DATE">Fecha</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {newAttribute.type === 'LIST' && (
+                <div>
+                  <Label>Valores (separados por coma)</Label>
+                  <Input value={newAttribute.values} onChange={e => setNewAttribute(a => ({ ...a, values: e.target.value }))} placeholder="Ej: Rojo, Azul, Verde" />
+                </div>
+              )}
+              {newAttribute.type === 'NUMBER' && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label>Valor mínimo</Label>
+                    <Input type="number" value={newAttribute.minValue} onChange={e => setNewAttribute(a => ({ ...a, minValue: e.target.value }))} placeholder="Ej: 0" />
+                  </div>
+                  <div>
+                    <Label>Valor máximo</Label>
+                    <Input type="number" value={newAttribute.maxValue} onChange={e => setNewAttribute(a => ({ ...a, maxValue: e.target.value }))} placeholder="Ej: 100" />
+                  </div>
+                </div>
+              )}
+              {newAttribute.type === 'STRING' && (
+                <div>
+                  <Label>Regex (validación)</Label>
+                  <Input value={newAttribute.regex} onChange={e => setNewAttribute(a => ({ ...a, regex: e.target.value }))} placeholder="Ej: ^[A-Za-z0-9]+$" />
+                </div>
+              )}
+              <div>
+                <Label>Unidad (opcional)</Label>
+                <Input value={newAttribute.unit} onChange={e => setNewAttribute(a => ({ ...a, unit: e.target.value }))} placeholder="Ej: cm, kg" />
+              </div>
+              <div>
+                <Label>Texto de ayuda (opcional)</Label>
+                <Input value={newAttribute.helpText} onChange={e => setNewAttribute(a => ({ ...a, helpText: e.target.value }))} placeholder="Ej: Solo números enteros" />
+              </div>
+              <div>
+                <Label>Depende de (ID de atributo)</Label>
+                <Input value={newAttribute.dependsOn} onChange={e => setNewAttribute(a => ({ ...a, dependsOn: e.target.value }))} placeholder="Ej: id de otro atributo" />
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch checked={newAttribute.isRequired} onCheckedChange={val => setNewAttribute(a => ({ ...a, isRequired: val }))} />
+                <Label>Obligatorio</Label>
+                <Switch checked={newAttribute.isGlobal} onCheckedChange={val => setNewAttribute(a => ({ ...a, isGlobal: val }))} />
+                <Label>Global</Label>
+              </div>
+              {attrModalError && <div className="text-xs text-destructive">{attrModalError}</div>}
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button type="button" variant="outline" onClick={() => setIsAttrModalOpen(false)}>Cancelar</Button>
+                  <Button type="submit">Crear atributo</Button>
+                </div>
+              </form>
+            </div>
+          </DialogContent>
+        </Dialog>
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Inputs dinámicos de atributos */}
           {attrLoading && <div className="text-xs text-muted-foreground">Cargando atributos...</div>}
+          {!attrLoading && attributes.length === 0 && (
+            <div className="text-xs text-muted-foreground border rounded p-2 bg-background/50">Esta categoría no tiene atributos configurados.</div>
+          )}
           {attributes.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {attributes.map(attr => (
@@ -236,6 +408,7 @@ export function AddProductModal({ isOpen, onClose, onProductAdded, categories }:
                       value={attributeValues[attr.attributeId] || ''}
                       onChange={e => setAttributeValues(v => ({ ...v, [attr.attributeId]: e.target.value }))}
                       placeholder={`Ingrese ${attr.name}`}
+                      className={attrErrors[attr.attributeId] ? 'border-destructive' : ''}
                     />
                   )}
                   {attr.type === 'NUMBER' && (

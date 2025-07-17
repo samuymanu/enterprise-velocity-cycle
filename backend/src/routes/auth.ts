@@ -1,4 +1,5 @@
 import express, { Request, Response } from 'express';
+import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt, { Secret } from 'jsonwebtoken';
 import crypto from 'crypto';
@@ -13,6 +14,18 @@ import {
 } from '../schemas/validation';
 
 const router = express.Router();
+
+// Middleware global de CORS (permitir desde cualquier origen para desarrollo)
+router.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
+// Endpoint de healthcheck para monitoreo
+router.get('/health', (req: Request, res: Response) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
 const prisma = new PrismaClient();
 const env = getEnvConfig();
 const jwtConfig = getJwtConfig();
@@ -89,6 +102,7 @@ router.post('/login',
   async (req: Request, res: Response) => {
     try {
       const { identifier, password } = req.body;
+      console.log('[AUTH] Intentando login para:', identifier);
       const user = await prisma.user.findFirst({
         where: {
           OR: [
@@ -99,12 +113,16 @@ router.post('/login',
         }
       });
       if (!user) {
+        console.warn('[AUTH] Usuario no encontrado:', identifier);
         return res.status(401).json({
           error: 'Credenciales inválidas',
           message: 'Usuario o password incorrectos'
         });
       }
       const isPasswordValid = await bcrypt.compare(password, user.password);
+      if (!isPasswordValid) {
+        console.warn('[AUTH] Password inválido para usuario:', identifier);
+      }
       if (!isPasswordValid) {
         return res.status(401).json({
           error: 'Credenciales inválidas',
@@ -119,10 +137,13 @@ router.post('/login',
         jwtSecret,
         { expiresIn }
       );
+      console.log('[AUTH] Login exitoso para usuario:', user.username, 'ID:', user.id);
       // Generar refresh token seguro
       const refreshToken = crypto.randomBytes(64).toString('hex');
       const expiresAt = new Date(Date.now() + msToMs(String(jwtConfig.refreshExpiresIn)));
       await prisma.refreshToken.create({
+        // Log de refresh token generado
+        // console.log('[AUTH] Refresh token generado para usuario:', user.id, refreshToken);
         data: {
           token: refreshToken,
           userId: user.id,
@@ -132,6 +153,8 @@ router.post('/login',
         }
       });
       res.json({
+        // Log de respuesta exitosa
+        // console.log('[AUTH] Respuesta enviada para login usuario:', user.id);
         message: 'Login exitoso',
         token,
         refreshToken,
@@ -145,8 +168,10 @@ router.post('/login',
         }
       });
     } catch (error) {
-      console.error('Error en login:', error);
-      res.status(500).json({
+      console.error('[AUTH] Error en login:', error);
+    res.status(500).json({
+      // Log de error de login
+      // console.error('[AUTH] Error interno al procesar login');
         error: 'Error interno del servidor',
         message: 'No se pudo procesar el login'
       });
@@ -161,11 +186,16 @@ router.post('/refresh', async (req: Request, res: Response) => {
     if (!refreshToken) {
       return res.status(400).json({ error: 'Refresh token requerido' });
     }
+    console.log('[AUTH] Intentando refresh token');
     const stored = await prisma.refreshToken.findUnique({ where: { token: refreshToken } });
     if (!stored || stored.revoked || stored.expiresAt < new Date()) {
+      console.warn('[AUTH] Refresh token inválido o expirado');
       return res.status(401).json({ error: 'Refresh token inválido o expirado' });
     }
     const user = await prisma.user.findUnique({ where: { id: stored.userId } });
+    if (!user || !user.isActive) {
+      console.warn('[AUTH] Usuario no válido para refresh token');
+    }
     if (!user || !user.isActive) {
       return res.status(401).json({ error: 'Usuario no válido' });
     }
@@ -177,6 +207,7 @@ router.post('/refresh', async (req: Request, res: Response) => {
       jwtSecret,
       { expiresIn }
     );
+    console.log('[AUTH] Nuevo access token generado para usuario:', user.id);
     // Opcional: rotar refresh token
     const newRefreshToken = crypto.randomBytes(64).toString('hex');
     const expiresAt = new Date(Date.now() + msToMs(jwtConfig.refreshExpiresIn as string));
@@ -198,25 +229,31 @@ router.post('/refresh', async (req: Request, res: Response) => {
       }
     });
     res.json({ token, refreshToken: newRefreshToken });
+    // console.log('[AUTH] Refresh token rotado para usuario:', user.id);
   } catch (error) {
     res.status(500).json({ error: 'Error al refrescar token' });
+    // console.error('[AUTH] Error interno al refrescar token');
   }
 });
 
 // Logout seguro (revoca refresh token)
 router.post('/logout', async (req: Request, res: Response) => {
+  console.log('[AUTH] Logout solicitado');
   try {
     const { refreshToken } = req.body;
     if (!refreshToken) {
       return res.status(400).json({ error: 'Refresh token requerido' });
     }
     await prisma.refreshToken.updateMany({
+      // console.log('[AUTH] Refresh token revocado:', refreshToken);
       where: { token: refreshToken, revoked: false },
       data: { revoked: true, revokedAt: new Date() }
     });
     res.json({ message: 'Logout exitoso' });
+    // console.log('[AUTH] Logout exitoso');
   } catch (error) {
     res.status(500).json({ error: 'Error al hacer logout' });
+    // console.error('[AUTH] Error interno al hacer logout');
   }
 });
 

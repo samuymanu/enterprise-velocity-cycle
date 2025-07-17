@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,6 +27,12 @@ interface Attribute {
   _count: {
     productValues: number;
   };
+  helpText?: string;
+  isGlobal?: boolean;
+  dependsOn?: string;
+  minValue?: number;
+  maxValue?: number;
+  regex?: string;
 }
 
 interface Category {
@@ -63,7 +69,13 @@ export function ManageAttributesModal({ isOpen, onClose, categories }: ManageAtt
     options: [] as string[],
     description: '',
     isActive: true,
-    newOption: ''
+    newOption: '',
+    helpText: '',
+    isGlobal: false,
+    dependsOn: '',
+    minValue: '',
+    maxValue: '',
+    regex: ''
   });
 
   useEffect(() => {
@@ -104,7 +116,13 @@ export function ManageAttributesModal({ isOpen, onClose, categories }: ManageAtt
       options: [],
       description: '',
       isActive: true,
-      newOption: ''
+      newOption: '',
+      helpText: '',
+      isGlobal: false,
+      dependsOn: '',
+      minValue: '',
+      maxValue: '',
+      regex: ''
     });
     setEditingAttribute(null);
     setIsCreating(false);
@@ -123,7 +141,13 @@ export function ManageAttributesModal({ isOpen, onClose, categories }: ManageAtt
       options: [...attribute.options],
       description: attribute.description || '',
       isActive: attribute.isActive,
-      newOption: ''
+      newOption: '',
+      helpText: attribute.helpText || '',
+      isGlobal: attribute.isGlobal || false,
+      dependsOn: attribute.dependsOn || '',
+      minValue: attribute.minValue !== undefined ? String(attribute.minValue) : '',
+      maxValue: attribute.maxValue !== undefined ? String(attribute.maxValue) : '',
+      regex: attribute.regex || ''
     });
     setEditingAttribute(attribute);
     setIsCreating(true);
@@ -171,20 +195,28 @@ export function ManageAttributesModal({ isOpen, onClose, categories }: ManageAtt
       const url = editingAttribute ? `/api/attributes/${editingAttribute.id}` : '/api/attributes';
       const method = editingAttribute ? 'PUT' : 'POST';
 
+      const body = {
+        name: formData.name.trim(),
+        type: formData.type,
+        unit: formData.unit.trim() || undefined,
+        options: formData.type === 'LIST' ? formData.options : [],
+        description: formData.description.trim() || undefined,
+        isActive: formData.isActive,
+        helpText: formData.helpText?.trim() || undefined,
+        isGlobal: formData.isGlobal || false,
+        dependsOn: formData.dependsOn?.trim() || undefined,
+        minValue: formData.minValue !== undefined && formData.minValue !== '' ? Number(formData.minValue) : undefined,
+        maxValue: formData.maxValue !== undefined && formData.maxValue !== '' ? Number(formData.maxValue) : undefined,
+        regex: formData.regex?.trim() || undefined
+      };
+
       const response = await fetch(url, {
         method,
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify({
-          name: formData.name.trim(),
-          type: formData.type,
-          unit: formData.unit.trim() || null,
-          options: formData.type === 'LIST' ? formData.options : [],
-          description: formData.description.trim() || null,
-          isActive: formData.isActive
-        })
+        body: JSON.stringify(body)
       });
 
       if (response.ok) {
@@ -261,6 +293,9 @@ export function ManageAttributesModal({ isOpen, onClose, categories }: ManageAtt
       <DialogContent className="max-w-6xl max-h-[90vh] overflow-hidden">
         <DialogHeader>
           <DialogTitle>Gestionar Atributos</DialogTitle>
+          <DialogDescription>
+            Crea, edita y elimina atributos personalizados para los productos. Los atributos permiten agregar información adicional y opciones específicas según la categoría.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[70vh]">
@@ -449,6 +484,63 @@ export function ManageAttributesModal({ isOpen, onClose, categories }: ManageAtt
                     rows={3}
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="helpText">Texto de ayuda (opcional)</Label>
+                  <Input
+                    id="helpText"
+                    value={formData.helpText}
+                    onChange={(e) => setFormData(prev => ({ ...prev, helpText: e.target.value }))}
+                    placeholder="Ejemplo: Este campo es para..."
+                  />
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="isGlobal"
+                    checked={formData.isGlobal}
+                    onCheckedChange={(checked) => setFormData(prev => ({ ...prev, isGlobal: checked }))}
+                  />
+                  <Label htmlFor="isGlobal">Atributo global</Label>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="dependsOn">Depende de (ID atributo)</Label>
+                  <Input
+                    id="dependsOn"
+                    value={formData.dependsOn}
+                    onChange={(e) => setFormData(prev => ({ ...prev, dependsOn: e.target.value }))}
+                    placeholder="ID de atributo del que depende"
+                  />
+                </div>
+                {(formData.type === 'NUMBER') && (
+                  <div className="space-y-2">
+                    <Label htmlFor="minValue">Valor mínimo</Label>
+                    <Input
+                      id="minValue"
+                      type="number"
+                      value={formData.minValue}
+                      onChange={(e) => setFormData(prev => ({ ...prev, minValue: e.target.value }))}
+                      placeholder="Ej: 0"
+                    />
+                    <Label htmlFor="maxValue">Valor máximo</Label>
+                    <Input
+                      id="maxValue"
+                      type="number"
+                      value={formData.maxValue}
+                      onChange={(e) => setFormData(prev => ({ ...prev, maxValue: e.target.value }))}
+                      placeholder="Ej: 100"
+                    />
+                  </div>
+                )}
+                {(formData.type === 'STRING') && (
+                  <div className="space-y-2">
+                    <Label htmlFor="regex">Regex (validación)</Label>
+                    <Input
+                      id="regex"
+                      value={formData.regex}
+                      onChange={(e) => setFormData(prev => ({ ...prev, regex: e.target.value }))}
+                      placeholder="Ej: ^[A-Za-z0-9]+$"
+                    />
+                  </div>
+                )}
 
                 <div className="flex items-center space-x-2">
                   <Switch
