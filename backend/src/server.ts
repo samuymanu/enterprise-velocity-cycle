@@ -140,7 +140,9 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5173',
   'http://localhost:8081',
-  'http://localhost:8082'
+  'http://localhost:8082',
+  'https://lovable.dev',
+  'https://www.lovable.dev'
 ];
 app.use(cors({
   origin: function (origin, callback) {
@@ -149,7 +151,9 @@ app.use(cors({
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     } else {
-      return callback(new Error('No permitido por CORS'), false);
+      // Permitir cualquier origen para pruebas remotas (comentar en producción)
+      // return callback(new Error('No permitido por CORS'), false);
+      return callback(null, true);
     }
   },
   credentials: true,
