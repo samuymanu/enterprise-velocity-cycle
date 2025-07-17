@@ -129,7 +129,7 @@ export const apiService = {
     },
 
     getAttributesByCategory: async (categoryId: string) => {
-      return apiRequest(`/products/attributes?categoryId=${categoryId}`);
+      return apiRequest(`/attributes?categoryId=${categoryId}`);
     }
   },
 
