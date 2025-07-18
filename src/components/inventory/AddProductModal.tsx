@@ -480,6 +480,10 @@ export function AddProductModal({ isOpen, onClose, onProductAdded, categories }:
                         src={url}
                         alt={`Preview ${idx + 1}`}
                         className="w-full h-full object-cover"
+                        onError={e => {
+                          e.currentTarget.onerror = null;
+                          e.currentTarget.src = '/placeholder.svg';
+                        }}
                       />
                     </div>
                   ))}
