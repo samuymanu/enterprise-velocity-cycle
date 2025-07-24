@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { ManageCategoriesModal } from "@/components/inventory/ManageCategoriesModal";
 import { ManageAttributesModal } from "@/components/inventory/ManageAttributesModal";
-import AddProductModal from "@/components/inventory/AddProductModal";
+import { AddProductModal } from "@/components/inventory/AddProductModal";
 import { EditProductModal } from "@/components/inventory/EditProductModal";
 import { DynamicFilters } from "@/components/inventory/DynamicFilters";
 import { apiService } from "@/lib/api";
