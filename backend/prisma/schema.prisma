@@ -160,6 +160,11 @@ model Product {
   serviceOrderItems ServiceOrderItem[]
   attributeValues ProductAttributeValue[]
 
+  @@index([categoryId])
+  @@index([name])
+  @@index([sku])
+  @@index([brandId])
+  @@index([status])
   @@map("products")
 }
 
@@ -334,6 +339,8 @@ model Attribute {
   categoryAttributes CategoryAttribute[]
   productValues      ProductAttributeValue[]
 
+  @@index([isGlobal])
+  @@index([isActive])
   @@map("attributes")
 }
 
@@ -358,6 +365,8 @@ model CategoryAttribute {
   attribute Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
 
   @@unique([categoryId, attributeId])
+  @@index([categoryId])
+  @@index([attributeId])
   @@map("category_attributes")
 }
 
@@ -374,6 +383,8 @@ model ProductAttributeValue {
   attribute Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
 
   @@unique([productId, attributeId])
+  @@index([productId])
+  @@index([attributeId])
   @@map("product_attribute_values")
 }
 

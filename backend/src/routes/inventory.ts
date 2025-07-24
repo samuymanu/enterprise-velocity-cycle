@@ -134,7 +134,6 @@ router.get('/search', async (req, res) => {
       where,
       include: {
         category: true,
-        images: true,
         attributeValues: {
           include: {
             attribute: true

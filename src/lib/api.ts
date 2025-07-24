@@ -27,17 +27,28 @@ const apiRequest = async (endpoint: string, options: RequestInit = {}) => {
     }
   });
 
+  let data;
+  try {
+    data = await response.json();
+  } catch (e) {
+    data = null;
+  }
+
   if (!response.ok) {
     if (response.status === 401) {
-      // Token expirado o inválido
       localStorage.removeItem('authToken');
       authToken = null;
       throw new Error('Sesión expirada. Por favor, inicia sesión nuevamente.');
     }
+    // Mostrar mensaje de error del backend si existe
+    if (data && (data.error || data.message)) {
+      const details = data.details ? `\n${data.details.map((d:any) => d.message).join('\n')}` : '';
+      throw new Error(`${data.error || data.message}${details}`);
+    }
     throw new Error(`Error ${response.status}: ${response.statusText}`);
   }
 
-  return response.json();
+  return data;
 };
 
 // API Services
@@ -72,6 +83,18 @@ export const apiService = {
 
   // Productos
   products: {
+    /**
+     * Asigna un atributo existente a una categoría.
+     * @param attributeId ID del atributo
+     * @param categoryId ID de la categoría
+     */
+    assignAttributeToCategory: async (attributeId: string, categoryId: string) => {
+      return apiRequest(`/attributes/${attributeId}/categories`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ categoryIds: [categoryId] })
+      });
+    },
     update: async (id: string, productData: FormData) => {
       return apiRequest(`/products/${id}`, {
         method: 'PUT',

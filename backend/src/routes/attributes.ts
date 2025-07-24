@@ -1,6 +1,8 @@
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authMiddleware } from '../middleware/auth';
+import { validateBody } from '../middleware/validation';
+import { createAttributeSchema, updateAttributeSchema, assignAttributeToCategoriesSchema } from '../schemas/attribute';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -42,7 +44,7 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/attributes - Crear nuevo atributo
-router.post('/', async (req, res) => {
+router.post('/', validateBody(createAttributeSchema), async (req, res) => {
   try {
     const { name, type, unit, helpText, isGlobal, dependsOn, minValue, maxValue, regex, options, description, isActive = true } = req.body;
 
@@ -110,7 +112,7 @@ router.post('/', async (req, res) => {
 });
 
 // PUT /api/attributes/:id - Actualizar atributo
-router.put('/:id', async (req, res) => {
+router.put('/:id', validateBody(updateAttributeSchema), async (req, res) => {
   try {
     const { id } = req.params;
     const { name, type, unit, options, description, isActive } = req.body;
@@ -240,7 +242,7 @@ router.delete('/:id', async (req, res) => {
 });
 
 // POST /api/attributes/:id/categories - Asignar atributo a categorías
-router.post('/:id/categories', async (req, res) => {
+router.post('/:id/categories', validateBody(assignAttributeToCategoriesSchema), async (req, res) => {
   try {
     const { id } = req.params;
     const { categoryIds, isRequired = false } = req.body;

@@ -1,7 +1,6 @@
 -- CreateEnum
 CREATE TYPE "AttributeType" AS ENUM ('STRING', 'NUMBER', 'BOOLEAN', 'LIST', 'DATE');
 
--- CreateTable
 CREATE TABLE "attributes" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
@@ -21,8 +20,9 @@ CREATE TABLE "attributes" (
 
     CONSTRAINT "attributes_pkey" PRIMARY KEY ("id")
 );
+CREATE INDEX "attributes_isGlobal_idx" ON "attributes"("isGlobal");
+CREATE INDEX "attributes_isActive_idx" ON "attributes"("isActive");
 
--- CreateTable
 CREATE TABLE "category_attributes" (
     "id" TEXT NOT NULL,
     "categoryId" TEXT NOT NULL,
@@ -33,8 +33,9 @@ CREATE TABLE "category_attributes" (
 
     CONSTRAINT "category_attributes_pkey" PRIMARY KEY ("id")
 );
+CREATE INDEX "category_attributes_categoryId_idx" ON "category_attributes"("categoryId");
+CREATE INDEX "category_attributes_attributeId_idx" ON "category_attributes"("attributeId");
 
--- CreateTable
 CREATE TABLE "product_attribute_values" (
     "id" TEXT NOT NULL,
     "productId" TEXT NOT NULL,
@@ -45,6 +46,8 @@ CREATE TABLE "product_attribute_values" (
 
     CONSTRAINT "product_attribute_values_pkey" PRIMARY KEY ("id")
 );
+CREATE INDEX "product_attribute_values_productId_idx" ON "product_attribute_values"("productId");
+CREATE INDEX "product_attribute_values_attributeId_idx" ON "product_attribute_values"("attributeId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "attributes_name_key" ON "attributes"("name");

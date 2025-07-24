@@ -8,7 +8,7 @@ const testProduct = {
   name: 'Test Product',
   description: 'Test Description',
   categoryId: 'test-category',
-  brand: 'Test Brand',
+  brand: undefined,
   costPrice: 100.00,
   salePrice: 150.00,
   stock: 10,
