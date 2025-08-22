@@ -1,5 +1,7 @@
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
+import { validateQuery } from '../middleware/validation';
+import logger from '../logger';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -161,7 +163,7 @@ router.get('/stats', async (req: any, res: any) => {
       }))
     });
   } catch (error) {
-    console.error('Error obteniendo estadísticas del dashboard:', error);
+    logger.error('Error obteniendo estadísticas del dashboard:', error);
     res.status(500).json({
       error: 'Error interno del servidor',
       message: 'No se pudieron obtener las estadísticas'

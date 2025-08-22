@@ -1,0 +1,216 @@
+# 🐳 DOCKER COMPOSE ENTERPRISE - PRODUCCIÓN
+# Configuración optimizada para entorno de producción
+
+version: '3.8'
+
+# Red personalizada para mejor aislamiento
+networks:
+  bikeshop-production:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.21.0.0/16
+
+# Volúmenes persistentes
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  backend_uploads:
+    driver: local
+  backend_logs:
+    driver: local
+  nginx_logs:
+    driver: local
+
+services:
+  # ================================
+  # DATABASE: PostgreSQL (Producción)
+  # ================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: bikeshop-postgres-prod
+    restart: always
+    networks:
+      - bikeshop-production
+    environment:
+      POSTGRES_DB: ${DATABASE_NAME}
+      POSTGRES_USER: ${DATABASE_USER}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # NO EXPONER PUERTO EN PRODUCCIÓN
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER} -d ${DATABASE_NAME}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  # ================================
+  # CACHE: Redis (Producción)
+  # ================================
+  redis:
+    image: redis:7-alpine
+    container_name: bikeshop-redis-prod
+    restart: always
+    networks:
+      - bikeshop-production
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD} --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    # NO EXPONER PUERTO EN PRODUCCIÓN
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  # ================================
+  # BACKEND: Node.js + Express (Producción)
+  # ================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    container_name: bikeshop-backend-prod
+    restart: always
+    networks:
+      - bikeshop-production
+    environment:
+      # Base
+      NODE_ENV: production
+      PORT: 3001
+      LOG_LEVEL: info
+
+      # Database
+      DATABASE_URL: postgresql://${DATABASE_USER}:${DATABASE_PASSWORD}@postgres:5432/${DATABASE_NAME}?schema=public&connection_limit=20&pool_timeout=20
+
+      # Redis
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+
+      # JWT
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
+
+      # File uploads
+      UPLOAD_MAX_SIZE: ${UPLOAD_MAX_SIZE:-10485760}
+      UPLOAD_ALLOWED_TYPES: ${UPLOAD_ALLOWED_TYPES:-image/jpeg,image/png,image/webp}
+
+      # CORS
+      CORS_ORIGIN: ${CORS_ORIGIN}
+
+      # Rate limiting
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-900000}
+      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-100}
+    volumes:
+      - backend_uploads:/app/uploads
+      - backend_logs:/app/logs
+    # NO EXPONER PUERTO DIRECTAMENTE
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "healthcheck.js"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+  # ================================
+  # FRONTEND: Nginx + React (Producción)
+  # ================================
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: bikeshop-frontend-prod
+    restart: always
+    networks:
+      - bikeshop-production
+    volumes:
+      - nginx_logs:/var/log/nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+  # ================================
+  # LOAD BALANCER: HAProxy (Opcional)
+  # ================================
+  # loadbalancer:
+  #   image: haproxy:2.8-alpine
+  #   container_name: bikeshop-loadbalancer
+  #   restart: always
+  #   networks:
+  #     - bikeshop-production
+  #   volumes:
+  #     - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #     - "8404:8404"  # HAProxy stats
+  #   depends_on:
+  #     - frontend
+  #     - backend

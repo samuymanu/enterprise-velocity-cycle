@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test API Configuration</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+    </style>
+</head>
+<body>
+    <h1>🔧 Test de Configuración API</h1>
+    <div id="results"></div>
+    
+    <script>
+        const resultsDiv = document.getElementById('results');
+        
+        function log(message, type = 'info') {
+            const p = document.createElement('p');
+            p.className = type;
+            p.textContent = message;
+            resultsDiv.appendChild(p);
+        }
+        
+        // Test 1: Verificar variables de entorno
+        log('🔍 Verificando configuración de API...', 'info');
+        
+        // Simular como Vite accede a las variables
+        const apiUrl = import.meta.env?.VITE_API_URL || 'http://localhost:3001/api';
+        log(`📍 URL de API configurada: ${apiUrl}`, apiUrl.includes('3001') ? 'success' : 'error');
+        
+        // Test 2: Verificar conectividad
+        async function testConnection() {
+            try {
+                log('🌐 Probando conexión con el backend...', 'info');
+                const response = await fetch(`${apiUrl}/health`);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    log('✅ Backend conectado correctamente', 'success');
+                    log(`📊 Estado: ${data.status}`, 'success');
+                } else {
+                    log(`❌ Error de conexión: ${response.status}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ Error de red: ${error.message}`, 'error');
+            }
+        }
+        
+        // Test 3: Verificar autenticación
+        async function testAuth() {
+            try {
+                log('🔐 Probando autenticación...', 'info');
+                const response = await fetch(`${apiUrl}/auth/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        identifier: 'admin@bikeshop.com',
+                        password: 'DevAdmin@2025!'
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    log('✅ Autenticación exitosa', 'success');
+                    localStorage.setItem('authToken', data.token);
+                    return data.token;
+                } else {
+                    log(`❌ Error de autenticación: ${response.status}`, 'error');
+                    return null;
+                }
+            } catch (error) {
+                log(`❌ Error en autenticación: ${error.message}`, 'error');
+                return null;
+            }
+        }
+        
+        // Test 4: Verificar API de productos
+        async function testProductsAPI(token) {
+            if (!token) {
+                log('⚠️ No se puede probar API de productos sin token', 'error');
+                return;
+            }
+            
+            try {
+                log('📦 Probando API de productos...', 'info');
+                const response = await fetch(`${apiUrl}/products`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    log(`✅ API de productos funcionando - ${data.products?.length || 0} productos encontrados`, 'success');
+                } else {
+                    log(`❌ Error en API de productos: ${response.status}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ Error en API de productos: ${error.message}`, 'error');
+            }
+        }
+        
+        // Ejecutar todos los tests
+        async function runAllTests() {
+            await testConnection();
+            const token = await testAuth();
+            await testProductsAPI(token);
+            log('🏁 Tests completados', 'info');
+        }
+        
+        // Ejecutar cuando la página cargue
+        runAllTests();
+    </script>
+</body>
+</html>

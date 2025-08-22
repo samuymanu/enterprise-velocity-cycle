@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const createAttributeSchema = z.object({
+  categoryId: z.string().optional(), // Permitir categoryId para asignación automática
   name: z.string().min(2, 'El nombre es obligatorio'),
   type: z.enum(['STRING', 'NUMBER', 'BOOLEAN', 'LIST', 'DATE']),
   unit: z.string().optional().nullable(),

@@ -200,11 +200,15 @@ export function ManageCategoriesModal({ isOpen, onClose, onDataChange }: ManageC
                         <SelectValue placeholder="Selecciona una categoría principal" />
                       </SelectTrigger>
                       <SelectContent>
-                        {getParentCategories().map((category) => (
-                          <SelectItem key={category.id} value={category.id}>
-                            {category.name}
-                          </SelectItem>
-                        ))}
+                        {getParentCategories().length === 0 ? (
+                          <div className="px-3 py-2 text-sm text-gray-500">No hay categorías principales disponibles</div>
+                        ) : (
+                          getParentCategories().map((category) => (
+                            <SelectItem key={category.id} value={category.id}>
+                              {category.name}
+                            </SelectItem>
+                          ))
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
@@ -228,8 +232,8 @@ export function ManageCategoriesModal({ isOpen, onClose, onDataChange }: ManageC
                     />
                   </div>
                   <Button 
-                    type="submit" 
-                    disabled={creatingSubcategory || !newSubcategoryName.trim() || !selectedParentId}
+                    type="submit"
+                    disabled={creatingSubcategory || !newSubcategoryName.trim() || !selectedParentId || getParentCategories().length === 0}
                   >
                     {creatingSubcategory ? 'Creando...' : 'Crear Subcategoría'}
                   </Button>

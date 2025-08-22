@@ -128,7 +128,7 @@ export default {
 				'pulse-subtle': 'pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
 			},
 			fontFamily: {
-				sans: ['Inter', 'system-ui', 'sans-serif'],
+				sans: ['Roboto', 'system-ui', 'sans-serif'],
 				mono: ['JetBrains Mono', 'Menlo', 'Monaco', 'monospace']
 			},
 			boxShadow: {

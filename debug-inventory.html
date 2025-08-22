@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Inventario - BikeShop ERP</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .debug-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .log-area {
+            background: #1a1a1a;
+            color: #00ff00;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .status.success { background: #d4edda; color: #155724; }
+        .status.error { background: #f8d7da; color: #721c24; }
+        .status.warning { background: #fff3cd; color: #856404; }
+        .status.info { background: #d1ecf1; color: #0c5460; }
+    </style>
+</head>
+<body>
+    <div class="debug-container">
+        <h1>🔧 Debug de Inventario - BikeShop ERP</h1>
+        <p>Esta herramienta te ayuda a diagnosticar problemas específicos del módulo de inventario.</p>
+        
+        <div id="status" class="status info">
+            Estado: Esperando pruebas...
+        </div>
+        
+        <div>
+            <button onclick="testBackendConnection()">🌐 Probar Conexión Backend</button>
+            <button onclick="testAuthentication()">🔐 Probar Autenticación</button>
+            <button onclick="testInventoryAPI()">📦 Probar API Inventario</button>
+            <button onclick="testCategoriesAPI()">📂 Probar API Categorías</button>
+            <button onclick="clearLogs()">🗑️ Limpiar Logs</button>
+        </div>
+    </div>
+    
+    <div class="debug-container">
+        <h2>📊 Logs de Depuración</h2>
+        <div id="logs" class="log-area">Iniciando depuración...\n</div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:3001/api';
+        let authToken = null;
+        
+        function updateStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = `Estado: ${message}`;
+            statusDiv.className = `status ${type}`;
+        }
+        
+        function log(message) {
+            const logsDiv = document.getElementById('logs');
+            const timestamp = new Date().toLocaleTimeString();
+            logsDiv.textContent += `[${timestamp}] ${message}\n`;
+            logsDiv.scrollTop = logsDiv.scrollHeight;
+        }
+        
+        function clearLogs() {
+            document.getElementById('logs').textContent = 'Logs limpiados.\n';
+            updateStatus('Logs limpiados', 'info');
+        }
+        
+        async function testBackendConnection() {
+            log('🌐 Iniciando prueba de conexión al backend...');
+            updateStatus('Probando conexión al backend...', 'warning');
+            
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                if (response.ok) {
+                    const data = await response.json();
+                    log(`✅ Backend conectado exitosamente`);
+                    log(`📊 Información del servidor: ${JSON.stringify(data, null, 2)}`);
+                    updateStatus('Backend conectado correctamente', 'success');
+                } else {
+                    log(`❌ Error de conexión: Status ${response.status}`);
+                    updateStatus(`Error de conexión: ${response.status}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ Error de red: ${error.message}`);
+                updateStatus(`Error de red: ${error.message}`, 'error');
+            }
+        }
+        
+        async function testAuthentication() {
+            log('🔐 Iniciando prueba de autenticación...');
+            updateStatus('Probando autenticación...', 'warning');
+            
+            try {
+                const response = await fetch(`${API_BASE}/auth/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: 'admin@bikeshop.com',
+                        password: 'admin123'
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    authToken = data.token;
+                    localStorage.setItem('authToken', authToken);
+                    log(`✅ Autenticación exitosa`);
+                    log(`🔑 Token recibido: ${authToken.substring(0, 20)}...`);
+                    updateStatus('Autenticación exitosa', 'success');
+                } else {
+                    const errorText = await response.text();
+                    log(`❌ Error de autenticación: Status ${response.status}`);
+                    log(`📄 Respuesta: ${errorText}`);
+                    updateStatus(`Error de autenticación: ${response.status}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ Error en autenticación: ${error.message}`);
+                updateStatus(`Error en autenticación: ${error.message}`, 'error');
+            }
+        }
+        
+        async function testInventoryAPI() {
+            log('📦 Iniciando prueba de API de inventario...');
+            updateStatus('Probando API de inventario...', 'warning');
+            
+            if (!authToken) {
+                log('❌ No hay token de autenticación. Ejecuta primero la prueba de autenticación.');
+                updateStatus('Token requerido', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/products`, {
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    log(`✅ API de productos funcionando correctamente`);
+                    log(`📊 Productos encontrados: ${data.products?.length || 0}`);
+                    if (data.products?.length > 0) {
+                        log(`📋 Primer producto: ${JSON.stringify(data.products[0], null, 2)}`);
+                    }
+                    updateStatus('API de inventario funcionando', 'success');
+                } else {
+                    const errorText = await response.text();
+                    log(`❌ Error en API de productos: Status ${response.status}`);
+                    log(`📄 Respuesta: ${errorText}`);
+                    updateStatus(`Error en API de inventario: ${response.status}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ Error en API de inventario: ${error.message}`);
+                updateStatus(`Error en API de inventario: ${error.message}`, 'error');
+            }
+        }
+        
+        async function testCategoriesAPI() {
+            log('📂 Iniciando prueba de API de categorías...');
+            updateStatus('Probando API de categorías...', 'warning');
+            
+            if (!authToken) {
+                log('❌ No hay token de autenticación. Ejecuta primero la prueba de autenticación.');
+                updateStatus('Token requerido', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/categories`, {
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    log(`✅ API de categorías funcionando correctamente`);
+                    log(`📊 Categorías encontradas: ${data.categories?.length || 0}`);
+                    if (data.categories?.length > 0) {
+                        log(`📋 Primera categoría: ${JSON.stringify(data.categories[0], null, 2)}`);
+                    }
+                    updateStatus('API de categorías funcionando', 'success');
+                } else {
+                    const errorText = await response.text();
+                    log(`❌ Error en API de categorías: Status ${response.status}`);
+                    log(`📄 Respuesta: ${errorText}`);
+                    updateStatus(`Error en API de categorías: ${response.status}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ Error en API de categorías: ${error.message}`);
+                updateStatus(`Error en API de categorías: ${error.message}`, 'error');
+            }
+        }
+        
+        // Inicializar
+        window.addEventListener('load', () => {
+            log('🚀 Herramienta de depuración inicializada');
+            // Recuperar token si existe
+            const savedToken = localStorage.getItem('authToken');
+            if (savedToken) {
+                authToken = savedToken;
+                log(`🔑 Token recuperado del almacenamiento local`);
+            }
+        });
+    </script>
+</body>
+</html>

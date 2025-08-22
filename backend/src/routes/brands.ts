@@ -1,5 +1,7 @@
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
+import { validateBody } from '../middleware/validation';
+import { createBrandSchema, updateBrandSchema } from '../schemas/brand';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -27,7 +29,7 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/brands - Crear nueva marca
-router.post('/', async (req, res) => {
+router.post('/', validateBody(createBrandSchema), async (req, res) => {
   try {
     const { name } = req.body;
 

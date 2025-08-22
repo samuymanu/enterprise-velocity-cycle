@@ -8,6 +8,7 @@ import bwipjs from 'bwip-js';
 import { validateQuery, validateBody, validateParams } from '../middleware/validation';
 import { validateUploadedFiles, sanitizeFileNames } from '../middleware/fileValidation';
 import { createResourceRateLimit, uploadRateLimit, searchRateLimit } from '../middleware/rateLimiter';
+// Force reload debug 2025-08-15 v2
 import { 
   createProductSchema, 
   updateProductSchema,
@@ -16,6 +17,7 @@ import {
 } from '../schemas/validation';
 import * as xlsx from 'xlsx';
 import { parse as csvParse } from 'csv-parse/sync';
+import { autoAssignCategoryAttributes, getCategoryAttributes } from '../services/attributeService';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -73,23 +75,22 @@ const uploadFields = upload.fields([
 // --- Fin de Configuración de Multer ---
 
 // Función para generar el siguiente número secuencial para el SKU
-async function getNextSequentialNumber(categoryCode: string): Promise<string> {
+async function getNextSequentialNumber(categoryCode: string, categoryId?: string): Promise<string> {
+  // Buscar el último SKU que empieza con el prefijo (y opcionalmente en la misma categoría)
+  const whereClause: any = {
+    sku: { startsWith: `${categoryCode}-` }
+  };
+  if (categoryId) whereClause.categoryId = categoryId;
+
   const lastProduct = await prisma.product.findFirst({
-    where: {
-      sku: {
-        startsWith: `${categoryCode}-`,
-      },
-    },
-    orderBy: {
-      sku: 'desc',
-    },
+    where: whereClause,
+    orderBy: { sku: 'desc' }
   });
 
-  if (!lastProduct) {
-    return '001';
-  }
+  if (!lastProduct) return '001';
 
-  const lastNumber = parseInt(lastProduct.sku.split('-')[1]) || 0;
+  const parts = lastProduct.sku.split('-');
+  const lastNumber = parseInt(parts[1]) || 0;
   return (lastNumber + 1).toString().padStart(3, '0');
 }
 
@@ -108,26 +109,159 @@ router.get('/',
   validateQuery(productQuerySchema),
   async (req: any, res: any) => {
     try {
-      const { page = 1, limit = 20, search, category, brand, status, ...rest } = req.query;
+      const { 
+        page = 1, 
+        limit = 20, 
+        search, 
+        searchType = 'contains',
+        category, 
+        categoryId,
+        brand, 
+        status,
+        priceRange_min,
+        priceRange_max,
+        stockRange_min,
+        stockRange_max,
+        createdDate_from,
+        createdDate_to,
+        hasImages,
+        hasBarcode,
+        ...rest 
+      } = req.query;
+      
+      console.log('🚀 GET /products - Query params:', { stockRange_min, stockRange_max, priceRange_min, priceRange_max });
+      
       const skip = (page - 1) * limit;
 
-      // Filtros estándar
+      // Filtros estándar mejorados
       const where: any = {};
+      
+      // Búsqueda con operadores avanzados
       if (search) {
-        where.OR = [
-          { name: { contains: search, mode: 'insensitive' } },
-          { sku: { contains: search, mode: 'insensitive' } },
-          { barcode: { contains: search, mode: 'insensitive' } }
-        ];
+        const searchConditions: any[] = [];
+
+        // Si se especifica searchField, limitar la búsqueda a ese campo
+        const allowedFields = ['name', 'sku', 'brand', 'barcode'];
+        const targetField = (req.query.searchField && String(req.query.searchField)) || undefined;
+        const effectiveField = targetField && allowedFields.includes(targetField) ? targetField : undefined;
+
+        const fieldCondition = (field: string) => {
+          switch (searchType) {
+            case 'exact':
+              if (field === 'brand') return { brand: { name: { equals: search, mode: 'insensitive' } } };
+              if (field === 'barcode') return { barcode: { equals: search } };
+              return { [field]: { equals: search, mode: 'insensitive' } };
+            case 'starts':
+              if (field === 'brand') return { brand: { name: { startsWith: search, mode: 'insensitive' } } };
+              if (field === 'barcode') return { barcode: { startsWith: search } };
+              return { [field]: { startsWith: search, mode: 'insensitive' } };
+            case 'ends':
+              if (field === 'brand') return { brand: { name: { endsWith: search, mode: 'insensitive' } } };
+              if (field === 'barcode') return { barcode: { endsWith: search } };
+              return { [field]: { endsWith: search, mode: 'insensitive' } };
+            case 'not':
+              if (field === 'brand') return { brand: { name: { not: { contains: search, mode: 'insensitive' } } } };
+              if (field === 'barcode') return { barcode: { not: { contains: search } } };
+              return { [field]: { not: { contains: search, mode: 'insensitive' } } };
+            default:
+              if (field === 'brand') return { brand: { name: { contains: search, mode: 'insensitive' } } };
+              if (field === 'barcode') return { barcode: { contains: search, mode: 'insensitive' } };
+              return { [field]: { contains: search, mode: 'insensitive' } };
+          }
+        };
+
+        if (effectiveField) {
+          // Buscar solo en el campo objetivo
+          const cond = fieldCondition(effectiveField);
+          if (searchType === 'not') {
+            where.AND = [cond];
+          } else {
+            where.OR = [cond];
+          }
+        } else {
+          // Búsqueda global en campos permitidos
+          for (const f of ['name', 'sku', 'brand', 'barcode']) {
+            searchConditions.push(fieldCondition(f));
+          }
+          if (searchConditions.length > 0) where.OR = searchConditions;
+        }
       }
+      
+      // Filtro por categoría (nombre o ID) - incluye subcategorías
       if (category) {
         where.category = { name: category };
       }
-      if (brand) {
-        where.brand = { contains: brand, mode: 'insensitive' };
+      if (categoryId) {
+        // Si se selecciona una categoría, incluir también sus subcategorías
+        const selectedCategory = await prisma.category.findUnique({
+          where: { id: categoryId },
+          select: { parentId: true }
+        });
+        
+        if (selectedCategory?.parentId === null) {
+          // Es una categoría padre, incluir subcategorías
+          const subcategories = await prisma.category.findMany({
+            where: { parentId: categoryId },
+            select: { id: true }
+          });
+          
+          const categoryIds = [categoryId, ...subcategories.map(sub => sub.id)];
+          where.categoryId = { in: categoryIds };
+        } else {
+          // Es una subcategoría, filtrar solo por ella
+          where.categoryId = categoryId;
+        }
       }
+      
+      // Filtro por marca (brand es relación -> filtrar por brand.name)
+      if (brand) {
+        where.brand = { name: { contains: brand, mode: 'insensitive' } };
+      }
+      
+      // Filtro por estado
       if (status) {
         where.status = status;
+      }
+      
+      // Filtros de rango de precio
+      if (priceRange_min !== undefined || priceRange_max !== undefined) {
+        where.salePrice = {};
+        if (priceRange_min !== undefined) where.salePrice.gte = parseFloat(priceRange_min);
+        if (priceRange_max !== undefined) where.salePrice.lte = parseFloat(priceRange_max);
+      }
+      
+      // Filtros de rango de stock
+      if (stockRange_min !== undefined || stockRange_max !== undefined) {
+        where.stock = {};
+        if (stockRange_min !== undefined) {
+          console.log('🔍 Setting stock.gte to:', parseInt(stockRange_min));
+          where.stock.gte = parseInt(stockRange_min);
+        }
+        if (stockRange_max !== undefined) {
+          console.log('🔍 Setting stock.lte to:', parseInt(stockRange_max));
+          where.stock.lte = parseInt(stockRange_max);
+        }
+        console.log('🔍 Final stock filter:', where.stock);
+      }
+      
+      // Filtros de fecha de creación
+      if (createdDate_from || createdDate_to) {
+        where.createdAt = {};
+        if (createdDate_from) where.createdAt.gte = new Date(createdDate_from);
+        if (createdDate_to) where.createdAt.lte = new Date(createdDate_to);
+      }
+      
+      // Filtros booleanos
+      if (hasImages === 'true') {
+        where.images = { isEmpty: false };
+      } else if (hasImages === 'false') {
+        where.images = { isEmpty: true };
+      }
+      
+      if (hasBarcode === 'true') {
+        where.barcode = { not: null };
+      } else if (hasBarcode === 'false') {
+        where.barcode = null;
       }
 
       // Filtros por atributos dinámicos
@@ -137,13 +271,15 @@ router.get('/',
 
       let products: any[] = [];
       let total = 0;
+      
+      console.log('🔍 Final where object before Prisma query:', JSON.stringify(where, null, 2));
 
       if (attributeFilters.length === 0) {
         // Sin filtros dinámicos: consulta normal
         [products, total] = await Promise.all([
           prisma.product.findMany({
             where,
-            include: { category: true },
+            include: { category: true, brand: true },
             orderBy: { id: 'desc' },
             skip,
             take: limit
@@ -176,7 +312,7 @@ router.get('/',
               ...where,
               id: { in: filteredProductIds }
             },
-            include: { category: true },
+            include: { category: true, brand: true },
             orderBy: { id: 'desc' },
             skip,
             take: limit
@@ -208,6 +344,315 @@ router.get('/',
     }
   });
 
+// GET /api/products/suggestions - Obtener sugerencias de búsqueda
+router.get('/suggestions', async (req: any, res: any) => {
+  try {
+    const { q: query } = req.query;
+    
+    if (!query || query.length < 2) {
+      return res.json({ suggestions: [] });
+    }
+
+    const searchQuery = String(query).toLowerCase();
+    
+    // Buscar productos por nombre, SKU y marca
+    const productSuggestions = await prisma.product.findMany({
+      where: {
+        OR: [
+          { name: { contains: searchQuery, mode: 'insensitive' } },
+          { sku: { contains: searchQuery, mode: 'insensitive' } },
+          { barcode: { contains: searchQuery, mode: 'insensitive' } },
+          { 
+            brand: {
+              name: { contains: searchQuery, mode: 'insensitive' }
+            }
+          }
+        ]
+      },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        barcode: true,
+        brand: {
+          select: {
+            name: true
+          }
+        }
+      },
+      take: 5
+    });
+
+    // Buscar categorías principales y subcategorías
+    const categorySuggestions = await prisma.category.findMany({
+      where: {
+        name: { contains: searchQuery, mode: 'insensitive' }
+      },
+      select: {
+        id: true,
+        name: true,
+        parentId: true,
+        parent: {
+          select: {
+            name: true
+          }
+        },
+        _count: {
+          select: { products: true }
+        }
+      },
+      take: 5
+    });
+
+    // Obtener marcas únicas que coincidan con la búsqueda
+    const brandSuggestions = await prisma.brand.findMany({
+      where: {
+        name: { 
+          contains: searchQuery, 
+          mode: 'insensitive'
+        }
+      },
+      select: {
+        name: true,
+        _count: {
+          select: { products: true }
+        }
+      },
+      take: 3
+    });
+
+    // Formatear sugerencias
+    const suggestions: any[] = [];
+
+    // Agregar productos
+    productSuggestions.forEach(product => {
+      if (product.name.toLowerCase().includes(searchQuery)) {
+        suggestions.push({
+          type: 'product',
+          value: product.name,
+          label: `${product.name} (${product.sku})`,
+          count: 1
+        });
+      }
+      
+      if (product.sku.toLowerCase().includes(searchQuery)) {
+        suggestions.push({
+          type: 'sku',
+          value: product.sku,
+          label: `SKU: ${product.sku} - ${product.name}`,
+          count: 1
+        });
+      }
+    });
+
+    // Agregar categorías y subcategorías
+    categorySuggestions.forEach(category => {
+      const isSubcategory = category.parentId !== null;
+      const label = isSubcategory 
+        ? `${category.parent?.name} > ${category.name}`
+        : `Categoría: ${category.name}`;
+      
+      suggestions.push({
+        type: isSubcategory ? 'subcategory' : 'category',
+        value: category.name,
+        label: label,
+        count: category._count.products,
+        categoryId: category.id,
+        parentId: category.parentId
+      });
+    });
+
+    // Agregar marcas
+    brandSuggestions.forEach(brand => {
+      suggestions.push({
+        type: 'brand',
+        value: brand.name,
+        label: `Marca: ${brand.name}`,
+        count: brand._count.products
+      });
+    });
+
+    // Eliminar duplicados y limitar resultados
+    const uniqueSuggestions = suggestions
+      .filter((suggestion, index, self) => 
+        index === self.findIndex(s => s.value === suggestion.value && s.type === suggestion.type)
+      )
+      .slice(0, 10);
+
+    res.json({
+      success: true,
+      suggestions: uniqueSuggestions
+    });
+  } catch (error) {
+    console.error('Error obteniendo sugerencias:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error interno del servidor'
+    });
+  }
+});
+
+// POST /api/products/search - Búsqueda avanzada por body (compatible con apiService.products.search)
+router.post('/search', async (req: any, res: any) => {
+  try {
+    const {
+      query: search,
+      filters = {},
+      page = 1,
+      limit = 20,
+      searchType = 'contains'
+    } = req.body || {};
+
+    const skip = (page - 1) * limit;
+
+    // Reusar lógica de construcción de 'where' similar a GET /
+    const where: any = {};
+
+    if (search) {
+      const searchConditions: any[] = [];
+
+      const allowedFields = ['name', 'sku', 'brand', 'barcode'];
+      const effectiveField = filters.searchField && allowedFields.includes(String(filters.searchField)) ? String(filters.searchField) : undefined;
+
+      const fieldCondition = (field: string) => {
+        switch (searchType) {
+          case 'exact':
+            if (field === 'brand') return { brand: { name: { equals: search, mode: 'insensitive' } } };
+            if (field === 'barcode') return { barcode: { equals: search } };
+            return { [field]: { equals: search, mode: 'insensitive' } };
+          case 'starts':
+            if (field === 'brand') return { brand: { name: { startsWith: search, mode: 'insensitive' } } };
+            if (field === 'barcode') return { barcode: { startsWith: search } };
+            return { [field]: { startsWith: search, mode: 'insensitive' } };
+          case 'ends':
+            if (field === 'brand') return { brand: { name: { endsWith: search, mode: 'insensitive' } } };
+            if (field === 'barcode') return { barcode: { endsWith: search } };
+            return { [field]: { endsWith: search, mode: 'insensitive' } };
+          case 'not':
+            if (field === 'brand') return { brand: { name: { not: { contains: search, mode: 'insensitive' } } } };
+            if (field === 'barcode') return { barcode: { not: { contains: search } } };
+            return { [field]: { not: { contains: search, mode: 'insensitive' } } };
+          default:
+            if (field === 'brand') return { brand: { name: { contains: search, mode: 'insensitive' } } };
+            if (field === 'barcode') return { barcode: { contains: search, mode: 'insensitive' } };
+            return { [field]: { contains: search, mode: 'insensitive' } };
+        }
+      };
+
+      if (effectiveField) {
+        const cond = fieldCondition(effectiveField);
+        if (searchType === 'not') {
+          where.AND = [cond];
+        } else {
+          where.OR = [cond];
+        }
+      } else {
+        for (const f of ['name', 'sku', 'brand', 'barcode']) searchConditions.push(fieldCondition(f));
+        if (searchConditions.length > 0) where.OR = searchConditions;
+      }
+    }
+
+    // Merge filters provided in body
+    const {
+      category,
+      categoryId,
+      brand,
+      status,
+      priceRange_min,
+      priceRange_max,
+      stockRange_min,
+      stockRange_max,
+      createdDate_from,
+      createdDate_to,
+      hasImages,
+      hasBarcode,
+      ...rest
+    } = filters;
+
+    if (category) where.category = { name: category };
+    if (categoryId) where.categoryId = categoryId;
+    if (brand) where.brand = { contains: brand, mode: 'insensitive' };
+    if (status) where.status = status;
+
+    if (priceRange_min !== undefined || priceRange_max !== undefined) {
+      where.salePrice = {};
+      if (priceRange_min !== undefined) where.salePrice.gte = Number(priceRange_min);
+      if (priceRange_max !== undefined) where.salePrice.lte = Number(priceRange_max);
+    }
+
+    if (stockRange_min !== undefined || stockRange_max !== undefined) {
+      where.stock = {};
+      if (stockRange_min !== undefined) where.stock.gte = parseInt(stockRange_min as any, 10);
+      if (stockRange_max !== undefined) where.stock.lte = parseInt(stockRange_max as any, 10);
+    }
+
+    if (createdDate_from || createdDate_to) {
+      where.createdAt = {};
+      if (createdDate_from) where.createdAt.gte = new Date(createdDate_from);
+      if (createdDate_to) where.createdAt.lte = new Date(createdDate_to);
+    }
+
+    if (hasImages === true || hasImages === 'true') {
+      where.images = { isEmpty: false };
+    } else if (hasImages === false || hasImages === 'false') {
+      where.images = { isEmpty: true };
+    }
+
+    if (hasBarcode === true || hasBarcode === 'true') {
+      where.barcode = { not: null };
+    } else if (hasBarcode === false || hasBarcode === 'false') {
+      where.barcode = null;
+    }
+
+    // Attribute filters (filters.attribute_<id> = value)
+    const attributeFilters = Object.entries(rest || {})
+      .filter(([key]) => key.startsWith('attribute_'))
+      .map(([key, value]) => ({ attributeId: key.replace('attribute_', ''), value }));
+
+    let products: any[] = [];
+    let total = 0;
+
+    if (attributeFilters.length === 0) {
+      [products, total] = await Promise.all([
+        prisma.product.findMany({ where, include: { category: true, brand: true }, orderBy: { id: 'desc' }, skip, take: limit }),
+        prisma.product.count({ where })
+      ]);
+    } else {
+      const productIds = await prisma.productAttributeValue.findMany({
+        where: { OR: attributeFilters.map(f => ({ attributeId: f.attributeId, value: String(f.value) })) },
+        select: { productId: true, attributeId: true }
+      });
+
+      const countByProduct: Record<string, number> = {};
+      for (const row of productIds) {
+        countByProduct[row.productId] = (countByProduct[row.productId] || 0) + 1;
+      }
+      const filteredProductIds = Object.entries(countByProduct).filter(([_, count]) => count === attributeFilters.length).map(([productId]) => productId);
+
+      [products, total] = await Promise.all([
+        prisma.product.findMany({ where: { ...where, id: { in: filteredProductIds } }, include: { category: true, brand: true }, orderBy: { id: 'desc' }, skip, take: limit }),
+        prisma.product.count({ where: { ...where, id: { in: filteredProductIds } } })
+      ]);
+    }
+
+    res.json({
+      products,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) }
+    });
+
+  } catch (error) {
+    console.error('Error en POST /products/search:', error);
+    const isDev = process.env.NODE_ENV !== 'production';
+    const message = error instanceof Error ? error.message : String(error);
+    const stack = error instanceof Error && error.stack ? (error as Error).stack : undefined;
+    res.status(500).json({
+      success: false,
+      error: isDev ? message : 'Error interno del servidor',
+      ...(isDev && stack ? { stack } : {})
+    });
+  }
+});
+
 // Obtener producto por ID
 router.get('/:id', async (req: any, res: any) => {
   try {
@@ -216,7 +661,13 @@ router.get('/:id', async (req: any, res: any) => {
     const product = await prisma.product.findUnique({
       where: { id },
       include: {
-        category: true
+        category: true,
+        brand: true,
+        attributeValues: {
+          include: {
+            attribute: true
+          }
+        }
       }
     });
 
@@ -323,6 +774,23 @@ router.post('/',
       const datasheetFile = files['datasheet']?.[0];
       const datasheetUrl = datasheetFile ? `/uploads/${datasheetFile.filename}` : null;
 
+      // Manejar la marca: crear o buscar si se proporciona
+      let brandId: string | null = null;
+      if (brand && brand.trim()) {
+        const existingBrand = await prisma.brand.findFirst({
+          where: { name: { equals: brand.trim(), mode: 'insensitive' } }
+        });
+        
+        if (existingBrand) {
+          brandId = existingBrand.id;
+        } else {
+          const newBrand = await prisma.brand.create({
+            data: { name: brand.trim() }
+          });
+          brandId = newBrand.id;
+        }
+      }
+
       // 1. Obtener la categoría para generar el SKU y validar atributos
       const category = await prisma.category.findUnique({
         where: { id: categoryId },
@@ -388,9 +856,11 @@ router.post('/',
         }
       }
 
-      // 2. Generar el código de la categoría (usando el padre si es subcategoría)
+      // 2. Generar el código de la categoría: preferir el campo 'code' si está disponible
       let categoryCode = '';
-      if (category.level === 0) {
+      if (category.code && typeof category.code === 'string' && category.code.trim()) {
+        categoryCode = category.code.toUpperCase();
+      } else if (category.level === 0) {
         categoryCode = generateCategoryCode(category.name);
       } else if (category.parent && category.parent.name) {
         categoryCode = generateCategoryCode(category.parent.name);
@@ -398,40 +868,105 @@ router.post('/',
         categoryCode = generateCategoryCode(category.name);
       }
 
-      // 3. Generar SKU y código de barras
-      const sequentialNumber = await getNextSequentialNumber(categoryCode);
+      // 3. Generar SKU y código de barras, usando categoryId para evitar colisiones
+      const sequentialNumber = await getNextSequentialNumber(categoryCode, categoryId);
       const generatedSku = `${categoryCode}-${sequentialNumber}`;
       const generatedBarcode = generatedSku;
 
-      // 4. Crear el producto en la base de datos
-      const newProduct = await prisma.product.create({
-        data: {
-          name,
-          description: description || null,
-          brand: brand || null,
-          costPrice: costPrice ? parseFloat(costPrice) : undefined,
-          salePrice: parseFloat(salePrice),
-          stock: stock ? parseInt(stock) : 0,
-          minStock: minStock ? parseInt(minStock) : 0,
-          maxStock: maxStock ? parseInt(maxStock) : null,
-          status: status || 'ACTIVE',
-          sku: generatedSku,
-          barcode: generatedBarcode,
-          images: imagePaths,
-          datasheetUrl,
-          metadata: parsedMetadata,
-          category: { connect: { id: categoryId } }
-        },
-        include: { category: true }
+      // Si el cliente envía un barcode explícito (multipart/form-data), preferirlo
+      let providedBarcode: string | undefined = undefined;
+      if (req.body && req.body.barcode && typeof req.body.barcode === 'string' && req.body.barcode.trim() !== '') {
+        providedBarcode = req.body.barcode.trim();
+      }
+
+      // Si se recibió barcode proporcionado, validar unicidad
+      if (providedBarcode) {
+        const existingWithBarcode = await prisma.product.findFirst({ where: { barcode: providedBarcode } });
+        if (existingWithBarcode) {
+          return res.status(400).json({ success: false, error: 'Conflicto: código de barras ya asignado a otro producto' });
+        }
+      }
+
+      console.log('📦 Backend: Received product data:');
+      console.log('📦 Stock value received:', { stock, type: typeof stock, truthy: !!stock });
+      console.log('📦 All body values:', {
+        name,
+        stock,
+        salePrice,
+        costPrice,
+        minStock,
+        maxStock
       });
 
-      // Guardar atributos dinámicos
-      for (const attr of attributesArray) {
-        await prisma.productAttributeValue.upsert({
-          where: { productId_attributeId: { productId: newProduct.id, attributeId: attr.attributeId } },
-          update: { value: String(attr.value) },
-          create: { productId: newProduct.id, attributeId: attr.attributeId, value: String(attr.value) }
-        });
+      // Procesar stock de manera más robusta
+      let processedStock = 0;
+      if (stock !== undefined && stock !== null && stock !== '') {
+        const parsedStock = parseInt(stock.toString());
+        if (!isNaN(parsedStock) && parsedStock >= 0) {
+          processedStock = parsedStock;
+        }
+      }
+      console.log('📦 Processed stock value:', processedStock);
+
+      // 4. Crear el producto en la base de datos
+      // Manejar colisiones de SKU (P2002) intentando reintentos con siguiente secuencial
+      let newProduct: any = null;
+      let attempt = 0;
+      const maxAttempts = 10;
+      let seq = parseInt(sequentialNumber, 10);
+
+      while (attempt < maxAttempts) {
+        const candidateSeq = String(seq).padStart(3, '0');
+        const candidateSku = `${categoryCode}-${candidateSeq}`;
+        try {
+          newProduct = await prisma.product.create({
+            data: {
+              name,
+              description: description || null,
+              brandId: brandId,
+              costPrice: costPrice ? parseFloat(costPrice) : undefined,
+              salePrice: parseFloat(salePrice),
+              stock: processedStock,
+              minStock: minStock ? parseInt(minStock) : 0,
+              maxStock: maxStock ? parseInt(maxStock) : null,
+              status: status || 'ACTIVE',
+              sku: candidateSku,
+              barcode: providedBarcode || candidateSku,
+              images: imagePaths,
+              datasheetUrl,
+              metadata: parsedMetadata,
+              categoryId: categoryId
+            },
+            include: { category: true, brand: true }
+          });
+
+          // Éxito
+          break;
+        } catch (err: any) {
+          // Si es error de conflicto por SKU, intentar siguiente secuencial
+          if (err && err.code === 'P2002' && err.meta && Array.isArray(err.meta.target) && err.meta.target.includes('sku')) {
+            attempt++;
+            seq += 1;
+            console.warn(`SKU conflict on ${candidateSku}, retrying with next seq (attempt ${attempt})`);
+            continue;
+          }
+          // Re-throw otras excepciones
+          throw err;
+        }
+      }
+
+      if (!newProduct) {
+        return res.status(500).json({ success: false, error: 'No se pudo generar un SKU único tras varios intentos' });
+      }
+
+      // 5. Auto-asignar atributos usando el nuevo servicio
+      try {
+        await autoAssignCategoryAttributes(newProduct.id, categoryId, attributesArray);
+        console.log(`✅ Atributos auto-asignados exitosamente para producto ${newProduct.id}`);
+      } catch (attributeError: any) {
+        console.error('Error en auto-asignación de atributos:', attributeError.message);
+        // No fallar la creación del producto por errores de atributos
+        // pero registrar el error
       }
 
       res.status(201).json({
@@ -554,8 +1089,18 @@ router.put('/:id',
       const updatedProduct = await prisma.product.update({
         where: { id },
         data: updateData,
-        include: { category: true }
+        include: { 
+          category: true,
+          brand: true,
+          attributeValues: {
+            include: {
+              attribute: true
+            }
+          }
+        }
       });
+
+      console.log('✅ Product updated successfully:', updatedProduct.id);
 
       res.json({
         success: true,
@@ -563,7 +1108,9 @@ router.put('/:id',
         data: updatedProduct
       });
     } catch (error: any) {
-      console.error('Error actualizando producto:', error);
+      console.error('❌ Error actualizando producto:', error);
+      console.error('❌ Error stack:', error.stack);
+      
       if (error.code === 'P2025') {
         return res.status(404).json({
           success: false,
@@ -571,10 +1118,20 @@ router.put('/:id',
           message: 'El producto especificado no existe'
         });
       }
+      
+      if (error.code === 'P2002') {
+        return res.status(400).json({
+          success: false,
+          error: 'Conflicto de datos únicos',
+          message: 'Ya existe un producto con este SKU o código de barras'
+        });
+      }
+      
       res.status(500).json({
         success: false,
         error: 'Error interno del servidor',
-        message: 'No se pudo actualizar el producto'
+        message: error.message || 'No se pudo actualizar el producto',
+        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
       });
     }
   });

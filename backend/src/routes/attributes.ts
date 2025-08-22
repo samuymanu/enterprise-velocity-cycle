@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { authMiddleware } from '../middleware/auth';
 import { validateBody } from '../middleware/validation';
 import { createAttributeSchema, updateAttributeSchema, assignAttributeToCategoriesSchema } from '../schemas/attribute';
+import { getCategoryAttributes } from '../services/attributeService';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -46,7 +47,9 @@ router.get('/', async (req, res) => {
 // POST /api/attributes - Crear nuevo atributo
 router.post('/', validateBody(createAttributeSchema), async (req, res) => {
   try {
-    const { name, type, unit, helpText, isGlobal, dependsOn, minValue, maxValue, regex, options, description, isActive = true } = req.body;
+    const { categoryId, name, type, unit, helpText, isGlobal, dependsOn, minValue, maxValue, regex, options, description, isActive = true } = req.body;
+
+    console.log('🚀 Creating attribute with data:', req.body);
 
     // Validaciones
     if (!name || !type) {
@@ -73,6 +76,20 @@ router.post('/', validateBody(createAttributeSchema), async (req, res) => {
       });
     }
 
+    // Si se proporciona categoryId, verificar que existe
+    if (categoryId) {
+      const categoryExists = await prisma.category.findUnique({
+        where: { id: categoryId }
+      });
+      
+      if (!categoryExists) {
+        return res.status(400).json({
+          success: false,
+          message: 'La categoría especificada no existe'
+        });
+      }
+    }
+
     const attribute = await prisma.attribute.create({
       data: {
         name,
@@ -88,6 +105,26 @@ router.post('/', validateBody(createAttributeSchema), async (req, res) => {
         isActive
       }
     });
+
+    console.log('✅ Attribute created:', attribute);
+
+    // Si se proporciona categoryId, asignar automáticamente el atributo a la categoría
+    if (categoryId) {
+      try {
+        await prisma.categoryAttribute.create({
+          data: {
+            categoryId: categoryId,
+            attributeId: attribute.id,
+            isRequired: false,
+            sortOrder: 0
+          }
+        });
+        console.log('✅ Attribute auto-assigned to category:', categoryId);
+      } catch (assignError) {
+        console.warn('⚠️ Could not auto-assign attribute to category:', assignError);
+        // No fallar la creación del atributo por esto
+      }
+    }
 
     res.status(201).json({
       success: true,
@@ -357,24 +394,66 @@ router.delete('/:id/categories/:categoryId', async (req, res) => {
   }
 });
 
-// GET /api/attributes/category/:categoryId - Obtener atributos de una categoría
+// GET /api/attributes/category/:categoryId - Obtener atributos de una categoría (mejorado con herencia)
 router.get('/category/:categoryId', async (req, res) => {
   try {
     const { categoryId } = req.params;
+    const { type } = req.query; // Filtro opcional por tipo de atributo
 
-    const categoryAttributes = await prisma.categoryAttribute.findMany({
-      where: { categoryId },
-      include: {
-        attribute: true
-      },
-      orderBy: {
-        sortOrder: 'asc'
+    // Usar el servicio mejorado que incluye herencia
+    const categoryAttributes = await getCategoryAttributes(categoryId);
+
+    // Filtrar por tipo si se especifica
+    let filteredAttributes = categoryAttributes;
+    if (type) {
+      filteredAttributes = categoryAttributes.filter(
+        ca => ca.attribute.type === String(type).toUpperCase()
+      );
+    }
+
+    // Formatear respuesta con información adicional
+    const formattedAttributes = filteredAttributes.map(ca => ({
+      id: ca.attribute.id,
+      name: ca.attribute.name,
+      type: ca.attribute.type,
+      unit: ca.attribute.unit,
+      helpText: ca.attribute.helpText,
+      isGlobal: ca.attribute.isGlobal,
+      isRequired: ca.isRequired,
+      sortOrder: ca.sortOrder,
+      dependsOn: ca.attribute.dependsOn,
+      minValue: ca.attribute.minValue,
+      maxValue: ca.attribute.maxValue,
+      regex: ca.attribute.regex,
+      options: ca.attribute.options,
+      description: ca.attribute.description,
+      isActive: ca.attribute.isActive,
+      // Información adicional del contexto de categoría
+      categoryAssignment: {
+        categoryId: ca.categoryId,
+        isRequired: ca.isRequired,
+        sortOrder: ca.sortOrder,
+        isInherited: ca.categoryId !== categoryId // Indica si viene de categoría padre
       }
-    });
+    }));
+
+    // Estadísticas adicionales
+    const stats = {
+      total: formattedAttributes.length,
+      required: formattedAttributes.filter(a => a.isRequired).length,
+      optional: formattedAttributes.filter(a => !a.isRequired).length,
+      inherited: formattedAttributes.filter(a => a.categoryAssignment.isInherited).length,
+      byType: formattedAttributes.reduce((acc, attr) => {
+        acc[attr.type] = (acc[attr.type] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>)
+    };
 
     res.json({
       success: true,
-      attributes: categoryAttributes
+      categoryId,
+      attributes: formattedAttributes,
+      stats
     });
   } catch (error) {
     console.error('Error al obtener atributos de categoría:', error);

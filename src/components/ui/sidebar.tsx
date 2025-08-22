@@ -127,6 +127,48 @@ const SidebarProvider = React.forwardRef<
       [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar]
     )
 
+    // Mantener atributo en <html> para compatibilidad con selectores CSS o scripts externos
+    React.useEffect(() => {
+      try {
+        document.documentElement.setAttribute('data-sidebar-open', String(open))
+      } catch (err) {
+        // no-op en entornos sin DOM
+      }
+    }, [open])
+
+    // Escuchar evento global para poder sincronizar el estado desde triggers externos
+    React.useEffect(() => {
+      const onExternalToggle = (e: any) => {
+        try {
+          const shouldOpen = e && e.detail && typeof e.detail.open === 'boolean' ? e.detail.open : null
+          if (shouldOpen === null) return
+          if (isMobile) {
+            setOpenMobile(Boolean(shouldOpen))
+          } else {
+            setOpen(Boolean(shouldOpen))
+          }
+        } catch (err) {
+          // ignore
+        }
+      }
+
+      window.addEventListener('app:sidebarToggled', onExternalToggle)
+      return () => window.removeEventListener('app:sidebarToggled', onExternalToggle)
+    }, [isMobile, setOpen, setOpenMobile])
+
+    React.useEffect(() => {
+      try {
+        const initialState = document.documentElement.getAttribute('data-sidebar-open') === 'true';
+        if (isMobile) {
+          setOpenMobile(initialState);
+        } else {
+          setOpen(initialState);
+        }
+      } catch (err) {
+        console.warn('Error syncing sidebar state with DOM attribute', err);
+      }
+    }, [isMobile, setOpen, setOpenMobile])
+
     return (
       <SidebarContext.Provider value={contextValue}>
         <TooltipProvider delayDuration={0}>
@@ -215,7 +257,7 @@ const Sidebar = React.forwardRef<
         ref={ref}
         className="group peer hidden md:block text-sidebar-foreground"
         data-state={state}
-        data-collapsible={state === "collapsed" ? collapsible : ""}
+        data-collapsible={collapsible}
         data-variant={variant}
         data-side={side}
       >
@@ -223,7 +265,7 @@ const Sidebar = React.forwardRef<
         <div
           className={cn(
             "duration-200 relative h-svh w-[--sidebar-width] bg-transparent transition-[width] ease-linear",
-            "group-data-[collapsible=offcanvas]:w-0",
+            "group-data-[collapsible=offcanvas][data-state=collapsed]:w-0",
             "group-data-[side=right]:rotate-180",
             variant === "floating" || variant === "inset"
               ? "group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4))]"
@@ -234,8 +276,8 @@ const Sidebar = React.forwardRef<
           className={cn(
             "duration-200 fixed inset-y-0 z-10 hidden h-svh w-[--sidebar-width] transition-[left,right,width] ease-linear md:flex",
             side === "left"
-              ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
-              : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
+              ? "left-0 group-data-[collapsible=offcanvas][data-state=collapsed]:left-[calc(var(--sidebar-width)*-1)]"
+              : "right-0 group-data-[collapsible=offcanvas][data-state=collapsed]:right-[calc(var(--sidebar-width)*-1)]",
             // Adjust the padding for floating and inset variants.
             variant === "floating" || variant === "inset"
               ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4)_+2px)]"
@@ -263,6 +305,19 @@ const SidebarTrigger = React.forwardRef<
 >(({ className, onClick, ...props }, ref) => {
   const { toggleSidebar } = useSidebar()
 
+  const handleDomToggle = () => {
+    try {
+      const root = document.documentElement
+      const current = root.getAttribute('data-sidebar-open') === 'true'
+      const next = !current
+      root.setAttribute('data-sidebar-open', String(next))
+      window.dispatchEvent(new CustomEvent('app:sidebarToggled', { detail: { open: next } }))
+    } catch (err) {
+      // no-op in non-DOM environments
+      console.warn('Sidebar DOM toggle failed', err)
+    }
+  }
+
   return (
     <Button
       ref={ref}
@@ -272,6 +327,9 @@ const SidebarTrigger = React.forwardRef<
       className={cn("h-7 w-7", className)}
       onClick={(event) => {
         onClick?.(event)
+        // toggle a nivel de DOM para compatibilidad con listeners externos
+        handleDomToggle()
+        // avisar al contexto interno para que actualice su estado
         toggleSidebar()
       }}
       {...props}

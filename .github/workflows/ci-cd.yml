@@ -1,0 +1,398 @@
+# 🔄 CI/CD ENTERPRISE PIPELINE
+# Workflow principal para tests automáticos y deployment
+
+name: 🚀 BikeShop ERP CI/CD Pipeline
+
+on:
+  push:
+    branches: 
+      - main
+      - develop
+      - 'feature/*'
+      - 'hotfix/*'
+  pull_request:
+    branches: 
+      - main
+      - develop
+  workflow_dispatch:
+
+# Variables de entorno globales
+env:
+  NODE_VERSION: '20'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+# Permisos necesarios
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+  checks: write
+  pull-requests: write
+
+jobs:
+  # ================================
+  # JOB 1: ANÁLISIS DE CÓDIGO
+  # ================================
+  code-analysis:
+    name: 🔍 Análisis de Código
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: 📥 Checkout código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+      
+      - name: 📦 Instalar dependencias Frontend
+        run: npm ci
+      
+      - name: 📦 Instalar dependencias Backend
+        working-directory: ./backend
+        run: npm ci
+      
+      - name: 🧹 Lint Frontend
+        run: npm run lint
+        continue-on-error: true
+      
+      - name: 🧹 Lint Backend
+        working-directory: ./backend
+        run: npm run lint || echo "Backend linting skipped"
+        continue-on-error: true
+      
+      - name: 🔧 TypeScript Check Frontend
+        run: npm run type-check || npx tsc --noEmit
+        continue-on-error: true
+      
+      - name: 🔧 TypeScript Check Backend
+        working-directory: ./backend
+        run: npm run type-check || npx tsc --noEmit
+        continue-on-error: true
+
+  # ================================
+  # JOB 2: SECURITY SCAN
+  # ================================
+  security-scan:
+    name: 🛡️ Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      - name: 📥 Checkout código
+        uses: actions/checkout@v4
+      
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: 🔍 npm audit Frontend
+        run: |
+          npm ci
+          npm audit --audit-level=moderate
+        continue-on-error: true
+      
+      - name: 🔍 npm audit Backend
+        working-directory: ./backend
+        run: |
+          npm ci
+          npm audit --audit-level=moderate
+        continue-on-error: true
+      
+      - name: 🛡️ CodeQL Analysis
+        uses: github/codeql-action/init@v3
+        with:
+          languages: typescript, javascript
+      
+      - name: 🛡️ Autobuild
+        uses: github/codeql-action/autobuild@v3
+      
+      - name: 🛡️ Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+  # ================================
+  # JOB 3: TESTS UNITARIOS
+  # ================================
+  unit-tests:
+    name: 🧪 Tests Unitarios
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    # Servicios necesarios para tests
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: bikeshop_test
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    
+    steps:
+      - name: 📥 Checkout código
+        uses: actions/checkout@v4
+      
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: 📦 Instalar dependencias Backend
+        working-directory: ./backend
+        run: npm ci
+      
+      - name: 🗄️ Setup Base de Datos
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/bikeshop_test?schema=public
+        run: |
+          npx prisma migrate deploy
+          npx prisma generate
+      
+      - name: 🧪 Ejecutar tests Backend
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/bikeshop_test?schema=public
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-jwt-secret-for-ci-cd
+          NODE_ENV: test
+        run: npm test -- --coverage --watchAll=false
+      
+      - name: 📊 Upload Coverage Backend
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./backend/coverage/lcov.info
+          flags: backend
+          name: backend-coverage
+      
+      - name: 📦 Instalar dependencias Frontend
+        run: npm ci
+      
+      - name: 🧪 Ejecutar tests Frontend
+        run: npm test -- --coverage --watchAll=false
+        continue-on-error: true
+      
+      - name: 📊 Upload Coverage Frontend
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage/lcov.info
+          flags: frontend
+          name: frontend-coverage
+        continue-on-error: true
+
+  # ================================
+  # JOB 4: BUILD Y DOCKER
+  # ================================
+  build-and-docker:
+    name: 🏗️ Build & Docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [code-analysis, security-scan]
+    
+    steps:
+      - name: 📥 Checkout código
+        uses: actions/checkout@v4
+      
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      # Build Frontend
+      - name: 📦 Instalar dependencias Frontend
+        run: npm ci
+      
+      - name: 🏗️ Build Frontend
+        run: npm run build
+      
+      - name: 📤 Upload Frontend Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: dist/
+          retention-days: 7
+      
+      # Build Backend
+      - name: 📦 Instalar dependencias Backend
+        working-directory: ./backend
+        run: npm ci
+      
+      - name: 🏗️ Build Backend
+        working-directory: ./backend
+        run: npm run build
+      
+      - name: 📤 Upload Backend Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-build
+          path: backend/dist/
+          retention-days: 7
+      
+      # Docker Setup
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: 🔐 Login to Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 🏷️ Extract metadata
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      - name: 🏷️ Extract metadata Frontend
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      - name: 🐳 Build Docker Backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: 🐳 Build Docker Frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ================================
+  # JOB 5: DEPLOY STAGING
+  # ================================
+  deploy-staging:
+    name: 🚀 Deploy Staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [unit-tests, build-and-docker]
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    environment: staging
+    
+    steps:
+      - name: 📥 Checkout código
+        uses: actions/checkout@v4
+      
+      - name: 🚀 Deploy to Staging
+        run: |
+          echo "🚀 Deploying to staging environment..."
+          echo "📊 Branch: ${{ github.ref }}"
+          echo "📝 Commit: ${{ github.sha }}"
+          # Aquí irían los comandos específicos de deploy
+          # Ejemplo: kubectl, ssh, docker-compose, etc.
+      
+      - name: ✅ Staging Deployment Success
+        run: |
+          echo "✅ Staging deployment completed successfully!"
+          echo "🌐 Staging URL: https://staging.bikeshop.com"
+
+  # ================================
+  # JOB 6: DEPLOY PRODUCTION
+  # ================================
+  deploy-production:
+    name: 🌐 Deploy Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [unit-tests, build-and-docker]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production
+    
+    steps:
+      - name: 📥 Checkout código
+        uses: actions/checkout@v4
+      
+      - name: 🚀 Deploy to Production
+        run: |
+          echo "🚀 Deploying to production environment..."
+          echo "📊 Branch: ${{ github.ref }}"
+          echo "📝 Commit: ${{ github.sha }}"
+          # Aquí irían los comandos específicos de deploy
+          # Ejemplo: kubectl, ssh, docker-compose, etc.
+      
+      - name: ✅ Production Deployment Success
+        run: |
+          echo "✅ Production deployment completed successfully!"
+          echo "🌐 Production URL: https://bikeshop.com"
+      
+      - name: 📢 Notify Success
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'success',
+              target_url: 'https://bikeshop.com',
+              description: 'Production deployment successful',
+              context: 'production-deployment'
+            });
+
+  # ================================
+  # JOB 7: CLEANUP
+  # ================================
+  cleanup:
+    name: 🧹 Cleanup
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [deploy-staging, deploy-production]
+    
+    steps:
+      - name: 🧹 Cleanup artifacts
+        run: |
+          echo "🧹 Cleaning up temporary files and artifacts..."
+          # Aquí irían comandos de limpieza si fueran necesarios

@@ -54,29 +54,36 @@ export const createProductSchema = z.object({
     .max(50, 'Marca demasiado larga')
     .optional(),
   categoryId: z.string()
-    .uuid('ID de categoría inválido'),
-  costPrice: z.number()
-    .min(0, 'Precio de costo debe ser positivo')
-    .max(999999.99, 'Precio de costo demasiado alto'),
-  salePrice: z.number()
-    .min(0, 'Precio de venta debe ser positivo')
-    .max(999999.99, 'Precio de venta demasiado alto'),
-  stock: z.number()
-    .int('Stock debe ser un número entero')
-    .min(0, 'Stock no puede ser negativo')
-    .max(999999, 'Stock demasiado alto')
+    .cuid('ID de categoría inválido'),
+  costPrice: z.union([
+    z.number(),
+    z.string().transform(val => parseFloat(val))
+  ])
+    .pipe(z.number().min(0, 'Precio de costo debe ser positivo').max(999999.99, 'Precio de costo demasiado alto')),
+  salePrice: z.union([
+    z.number(),
+    z.string().transform(val => parseFloat(val))
+  ])
+    .pipe(z.number().min(0, 'Precio de venta debe ser positivo').max(999999.99, 'Precio de venta demasiado alto')),
+  stock: z.union([
+    z.number(),
+    z.string().transform(val => parseInt(val, 10))
+  ])
+    .pipe(z.number().int('Stock debe ser un número entero').min(0, 'Stock no puede ser negativo').max(999999, 'Stock demasiado alto'))
     .optional()
     .default(0),
-  minStock: z.number()
-    .int('Stock mínimo debe ser un número entero')
-    .min(0, 'Stock mínimo no puede ser negativo')
-    .max(999999, 'Stock mínimo demasiado alto')
+  minStock: z.union([
+    z.number(),
+    z.string().transform(val => parseInt(val, 10))
+  ])
+    .pipe(z.number().int('Stock mínimo debe ser un número entero').min(0, 'Stock mínimo no puede ser negativo').max(999999, 'Stock mínimo demasiado alto'))
     .optional()
     .default(10),
-  maxStock: z.number()
-    .int('Stock máximo debe ser un número entero')
-    .min(0, 'Stock máximo no puede ser negativo')
-    .max(999999, 'Stock máximo demasiado alto')
+  maxStock: z.union([
+    z.number(),
+    z.string().transform(val => parseInt(val, 10))
+  ])
+    .pipe(z.number().int('Stock máximo debe ser un número entero').min(0, 'Stock máximo no puede ser negativo').max(999999, 'Stock máximo demasiado alto'))
     .optional(),
   barcode: z.string()
     .max(50, 'Código de barras demasiado largo')
@@ -108,7 +115,7 @@ export const productQuerySchema = z.object({
     .max(100, 'Búsqueda demasiado larga')
     .optional(),
   categoryId: z.string()
-    .uuid('ID de categoría inválido')
+    .cuid('ID de categoría inválido')
     .optional(),
   status: z.enum(['ACTIVE', 'INACTIVE', 'DISCONTINUED'])
     .optional(),
@@ -117,7 +124,23 @@ export const productQuerySchema = z.object({
     .default('createdAt'),
   sortOrder: z.enum(['asc', 'desc'])
     .optional()
-    .default('desc')
+    .default('desc'),
+  stockRange_min: z.string()
+    .transform(val => parseInt(val, 10))
+    .pipe(z.number().int().min(0, 'Stock mínimo debe ser 0 o mayor'))
+    .optional(),
+  stockRange_max: z.string()
+    .transform(val => parseInt(val, 10))
+    .pipe(z.number().int().min(0, 'Stock máximo debe ser 0 o mayor'))
+    .optional(),
+  priceRange_min: z.string()
+    .transform(val => parseFloat(val))
+    .pipe(z.number().min(0, 'Precio mínimo debe ser 0 o mayor'))
+    .optional(),
+  priceRange_max: z.string()
+    .transform(val => parseFloat(val))
+    .pipe(z.number().min(0, 'Precio máximo debe ser 0 o mayor'))
+    .optional()
 });
 
 // ===== SCHEMAS DE CATEGORÍAS =====
@@ -135,7 +158,7 @@ export const createCategorySchema = z.object({
     .regex(/^[A-Z]+$/, 'Código debe ser solo letras mayúsculas')
     .optional(),
   parentId: z.string()
-    .uuid('ID de categoría padre inválido')
+    .cuid('ID de categoría padre inválido')
     .optional(),
   level: z.number()
     .int('Nivel debe ser un número entero')
@@ -213,14 +236,141 @@ export const updateCustomerSchema = createCustomerSchema.partial().extend({
     .optional()
 });
 
+// ===== SCHEMAS DE MOVIMIENTOS DE INVENTARIO =====
+
+export const createInventoryMovementSchema = z.object({
+  productId: z.string()
+    .cuid('ID de producto inválido'),
+  type: z.enum(['IN', 'OUT', 'ADJUSTMENT', 'TRANSFER']),
+  quantity: z.union([
+    z.number(),
+    z.string().transform(val => parseInt(val, 10))
+  ])
+    .pipe(z.number().int('Cantidad debe ser un número entero')
+    .min(1, 'Cantidad debe ser al menos 1')
+    .max(999999, 'Cantidad demasiado alta')),
+  reason: z.string()
+    .min(1, 'Razón es requerida')
+    .max(200, 'Razón demasiado larga')
+    .trim(),
+  cost: z.union([
+    z.number(),
+    z.string().transform(val => parseFloat(val))
+  ])
+    .pipe(z.number().min(0, 'Costo debe ser positivo').max(999999.99, 'Costo demasiado alto'))
+    .optional(),
+  notes: z.string()
+    .max(500, 'Notas demasiado largas')
+    .optional(),
+  metadata: z.record(z.string(), z.any())
+    .optional()
+});
+
+export const inventoryMovementQuerySchema = z.object({
+  productId: z.string()
+    .cuid('ID de producto inválido')
+    .optional(),
+  type: z.enum(['IN', 'OUT', 'ADJUSTMENT', 'TRANSFER'])
+    .optional(),
+  startDate: z.string()
+    .datetime('Fecha de inicio inválida')
+    .optional(),
+  endDate: z.string()
+    .datetime('Fecha de fin inválida')
+    .optional(),
+  userId: z.string()
+    .cuid('ID de usuario inválido')
+    .optional(),
+  page: z.string()
+    .transform(val => parseInt(val, 10))
+    .pipe(z.number().int().min(1, 'Página debe ser mayor a 0'))
+    .optional()
+    .default(1),
+  limit: z.string()
+    .transform(val => parseInt(val, 10))
+    .pipe(z.number().int().min(1).max(100, 'Límite máximo 100'))
+    .optional()
+    .default(20),
+  sortBy: z.enum(['createdAt', 'quantity', 'type'])
+    .optional()
+    .default('createdAt'),
+  sortOrder: z.enum(['asc', 'desc'])
+    .optional()
+    .default('desc')
+});
+
+export const updateStockSchema = z.object({
+  quantity: z.union([
+    z.number(),
+    z.string().transform(val => parseInt(val, 10))
+  ])
+    .pipe(z.number().int('Cantidad debe ser un número entero')
+    .min(0, 'Cantidad no puede ser negativa')
+    .max(999999, 'Cantidad demasiado alta')),
+  reason: z.string()
+    .min(1, 'Razón es requerida')
+    .max(200, 'Razón demasiado larga')
+    .trim(),
+  notes: z.string()
+    .max(500, 'Notas demasiado largas')
+    .optional()
+});
+
+// ===== SCHEMAS DE ALERTAS =====
+
+export const createAlertSchema = z.object({
+  type: z.enum(['LOW_STOCK', 'OUT_OF_STOCK', 'OVERSTOCK', 'SYSTEM']),
+  priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'])
+    .optional()
+    .default('MEDIUM'),
+  productId: z.string()
+    .cuid('ID de producto inválido')
+    .optional(),
+  message: z.string()
+    .min(1, 'Mensaje es requerido')
+    .max(500, 'Mensaje demasiado largo')
+    .trim(),
+  metadata: z.record(z.string(), z.any())
+    .optional(),
+  autoResolve: z.boolean()
+    .optional()
+    .default(false),
+  expiresAt: z.string()
+    .datetime('Fecha de expiración inválida')
+    .optional()
+});
+
+export const alertQuerySchema = z.object({
+  type: z.enum(['LOW_STOCK', 'OUT_OF_STOCK', 'OVERSTOCK', 'SYSTEM'])
+    .optional(),
+  priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'])
+    .optional(),
+  status: z.enum(['ACTIVE', 'RESOLVED', 'EXPIRED'])
+    .optional()
+    .default('ACTIVE'),
+  productId: z.string()
+    .cuid('ID de producto inválido')
+    .optional(),
+  page: z.string()
+    .transform(val => parseInt(val, 10))
+    .pipe(z.number().int().min(1))
+    .optional()
+    .default(1),
+  limit: z.string()
+    .transform(val => parseInt(val, 10))
+    .pipe(z.number().int().min(1).max(100))
+    .optional()
+    .default(20)
+});
+
 // ===== SCHEMAS DE VENTAS =====
 
 export const createSaleSchema = z.object({
   customerId: z.string()
-    .uuid('ID de cliente inválido'),
+    .cuid('ID de cliente inválido'),
   items: z.array(z.object({
     productId: z.string()
-      .uuid('ID de producto inválido'),
+      .cuid('ID de producto inválido'),
     quantity: z.number()
       .int('Cantidad debe ser un número entero')
       .min(1, 'Cantidad debe ser al menos 1')
@@ -246,7 +396,7 @@ export const createSaleSchema = z.object({
 
 export const idParamSchema = z.object({
   id: z.string()
-    .uuid('ID inválido')
+    .cuid('ID inválido')
 });
 
 export const paginationSchema = z.object({
@@ -276,3 +426,10 @@ export type UpdateCustomerRequest = z.infer<typeof updateCustomerSchema>;
 export type CreateSaleRequest = z.infer<typeof createSaleSchema>;
 export type IdParam = z.infer<typeof idParamSchema>;
 export type PaginationQuery = z.infer<typeof paginationSchema>;
+
+// Nuevos tipos para movimientos e inventario
+export type CreateInventoryMovementRequest = z.infer<typeof createInventoryMovementSchema>;
+export type InventoryMovementQuery = z.infer<typeof inventoryMovementQuerySchema>;
+export type UpdateStockRequest = z.infer<typeof updateStockSchema>;
+export type CreateAlertRequest = z.infer<typeof createAlertSchema>;
+export type AlertQuery = z.infer<typeof alertQuerySchema>;

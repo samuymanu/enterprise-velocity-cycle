@@ -1,162 +1,99 @@
+import React from 'react';
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ProductSearch } from "@/components/pos/ProductSearch";
+import { ProductFilters } from "@/components/pos/ProductFilters";
+import { ShoppingCart } from "@/components/pos/ShoppingCart";
+import { SaleSummary } from "@/components/pos/SaleSummary";
+import { PaymentMethods } from "@/components/pos/PaymentMethods";
+import { CustomerActions } from "@/components/pos/CustomerActions";
+import { SaleActions } from "@/components/pos/SaleActions";
+import { RecentSales } from "@/components/pos/RecentSales";
 
 export default function POS() {
+  // Carrito local simple (por ahora en memoria)
+  const [cart, setCart] = React.useState<{ id: string; name: string; sku?: string; quantity: number; price?: number }[]>([]);
+
+  const handleProductSelect = (product: any) => {
+  console.log('handleProductSelect product:', product);
+    setCart(prev => {
+      const existing = prev.find(p => p.id === product.id);
+      if (existing) {
+        return prev.map(p => p.id === product.id ? { ...p, quantity: p.quantity + 1 } : p);
+      }
+  const price = (product.price ?? product.salePrice ?? product.sale_price ?? 0) as number;
+  return [{ id: product.id, name: product.name, sku: product.sku || product.barcode || '', quantity: 1, price }, ...prev];
+    });
+  };
+
+  const handleRemove = (id: string) => {
+    setCart(prev => prev.filter(p => p.id !== id));
+  };
+
+  const handleQuantityChange = (id: string, newQuantity: number) => {
+    if (newQuantity <= 0) {
+      handleRemove(id);
+      return;
+    }
+    setCart(prev => prev.map(p => p.id === id ? { ...p, quantity: newQuantity } : p));
+  };
+
+  const handleClearCart = () => {
+    setCart([]);
+  };
+
   return (
     <AppLayout>
-      <div className="container-enterprise py-8 space-y-8">
-        {/* Page Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-foreground">Punto de Venta</h1>
-            <p className="text-foreground-secondary">
-              Sistema de ventas rápido y eficiente
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <Badge variant="outline" className="text-success border-success">
-              🟢 Caja Abierta
-            </Badge>
-            <Button size="sm" className="bg-primary hover:bg-primary-hover">
-              💰 Cerrar Caja
-            </Button>
-          </div>
-        </div>
-
-        {/* POS Interface */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Product Search & Cart */}
-          <div className="lg:col-span-2 space-y-6">
-            <Card className="enterprise-card p-6">
-              <h3 className="text-lg font-semibold text-foreground mb-4">Búsqueda de Productos</h3>
-              <div className="space-y-4">
-                <div className="flex gap-2">
-                  <input 
-                    id="pos-product-search"
-                    name="pos-product-search"
-                    type="text" 
-                    placeholder="Buscar por código, nombre o escanear código de barras..."
-                    className="enterprise-input flex-1"
-                  />
-                  <Button>🔍 Buscar</Button>
-                </div>
-                
-                {/* Quick Categories */}
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" size="sm">🚲 Bicicletas</Button>
-                  <Button variant="outline" size="sm">🏍️ Motos</Button>
-                  <Button variant="outline" size="sm">⚙️ Repuestos</Button>
-                  <Button variant="outline" size="sm">🛡️ Accesorios</Button>
-                  <Button variant="outline" size="sm">⛑️ Cascos</Button>
-                </div>
+      <div className="w-full p-6">
+        {/* Header mejorado */}
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl p-6 mb-6">
+          <div className="flex items-start justify-between">
+            <div>
+              <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-2">
+                💳 Punto de Venta
+              </h1>
+              <p className="text-gray-600 dark:text-gray-300">Sistema de ventas rápido y eficiente</p>
+            </div>
+            <div className="flex items-start gap-4">
+              <CustomerActions />
+              <div className="w-80">
+                <SaleSummary cartItems={cart} />
               </div>
-            </Card>
-
-            {/* Shopping Cart */}
-            <Card className="enterprise-card p-6">
-              <h3 className="text-lg font-semibold text-foreground mb-4">Carrito de Compras</h3>
-              <div className="space-y-4">
-                <div className="text-center text-foreground-secondary py-8">
-                  <p>🛒 Carrito vacío</p>
-                  <p className="text-sm mt-2">Busca y agrega productos para comenzar una venta</p>
-                </div>
-              </div>
-            </Card>
-          </div>
-
-          {/* Sale Summary & Payment */}
-          <div className="space-y-6">
-            <Card className="enterprise-card p-6">
-              <h3 className="text-lg font-semibold text-foreground mb-4">Resumen de Venta</h3>
-              <div className="space-y-4">
-                <div className="flex justify-between">
-                  <span className="text-foreground-secondary">Subtotal:</span>
-                  <span className="font-medium">$0.00</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-foreground-secondary">Descuento:</span>
-                  <span className="font-medium">$0.00</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-foreground-secondary">IVA (16%):</span>
-                  <span className="font-medium">$0.00</span>
-                </div>
-                <hr className="border-border" />
-                <div className="flex justify-between text-lg font-bold">
-                  <span>Total:</span>
-                  <span className="text-primary">$0.00</span>
-                </div>
-              </div>
-            </Card>
-
-            <Card className="enterprise-card p-6">
-              <h3 className="text-lg font-semibold text-foreground mb-4">Métodos de Pago</h3>
-              <div className="space-y-3">
-                <Button variant="outline" className="w-full justify-start gap-2">
-                  💵 Efectivo VES
-                </Button>
-                <Button variant="outline" className="w-full justify-start gap-2">
-                  💸 Efectivo USD
-                </Button>
-                <Button variant="outline" className="w-full justify-start gap-2">
-                  💳 Tarjeta de Crédito/Débito
-                </Button>
-                <Button variant="outline" className="w-full justify-start gap-2">
-                  🏦 Transferencia Bancaria
-                </Button>
-                <Button variant="outline" className="w-full justify-start gap-2">
-                  💰 Zelle
-                </Button>
-                <Button variant="outline" className="w-full justify-start gap-2">
-                  ₿ USDT/Crypto
-                </Button>
-              </div>
-            </Card>
-
-            <Card className="enterprise-card p-6">
-              <h3 className="text-lg font-semibold text-foreground mb-4">Cliente</h3>
-              <div className="space-y-3">
-                <input 
-                  id="pos-customer-search"
-                  name="pos-customer-search"
-                  type="text" 
-                  placeholder="Buscar cliente por documento o nombre..."
-                  className="enterprise-input w-full"
-                />
-                <Button variant="outline" className="w-full">
-                  👤 Cliente General
-                </Button>
-                <Button variant="outline" className="w-full">
-                  ➕ Nuevo Cliente
-                </Button>
-              </div>
-            </Card>
-
-            <div className="space-y-2">
-              <Button 
-                size="lg" 
-                className="w-full bg-success hover:bg-success/90 text-success-foreground"
-                disabled
-              >
-                ✅ Procesar Venta
-              </Button>
-              <Button variant="outline" size="lg" className="w-full">
-                🏪 Apartar Producto
-              </Button>
             </div>
           </div>
         </div>
 
-        {/* Recent Sales */}
-        <Card className="enterprise-card p-6">
-          <h3 className="text-lg font-semibold text-foreground mb-4">Ventas del Día</h3>
-          <div className="text-center text-foreground-secondary py-4">
-            <p>📊 No hay ventas registradas hoy</p>
-            <p className="text-sm mt-2">Las ventas aparecerán aquí una vez que proceses la primera transacción</p>
+        {/* Interface Principal - Layout reorganizado */}
+        <div className="grid grid-cols-12 gap-6">
+          {/* Columna izquierda - Filtros y Búsqueda (más ancho) */}
+          <div className="col-span-4 space-y-4">
+            <ProductFilters />
+            <ProductSearch onProductSelect={handleProductSelect} />
           </div>
-        </Card>
+
+          {/* Carrito prominente en el centro */}
+          <div className="col-span-6">
+            <ShoppingCart 
+              items={cart} 
+              onRemove={handleRemove} 
+              onQuantityChange={handleQuantityChange}
+            />
+          </div>
+
+          {/* Columna derecha - Métodos de pago y acciones (más estrecho) */}
+          <div className="col-span-2 space-y-6">
+            <PaymentMethods />
+            <div className="space-y-4">
+              <SaleActions cartItems={cart} onClearCart={handleClearCart} />
+            </div>
+          </div>
+        </div>
+
+        {/* Ventas Recientes */}
+        <div className="mt-8">
+          <RecentSales />
+        </div>
       </div>
     </AppLayout>
   );

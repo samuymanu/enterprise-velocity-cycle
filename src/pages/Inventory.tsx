@@ -12,16 +12,24 @@ import { ManageAttributesModal } from "@/components/inventory/ManageAttributesMo
 import { AddProductModal } from "@/components/inventory/AddProductModal";
 import { EditProductModal } from "@/components/inventory/EditProductModal";
 import { DynamicFilters } from "@/components/inventory/DynamicFilters";
+import { AdvancedSearch } from "@/components/inventory/AdvancedSearch";
+import MovementForm from "@/components/inventory/MovementForm";
+import StockHistory from "@/components/inventory/StockHistory";
 import { apiService } from "@/lib/api";
+import authManager from "@/lib/authManager";
+import { useNotifications } from "@/stores/notificationStore";
 import { useState, useEffect, useRef } from "react";
 import { BarcodePreview } from "./BarcodePreview";
 import { ProductSheetPreview } from "./ProductSheetPreview";
-import { Settings, Plus, RefreshCw, FilePenLine, Barcode, Download, FileText, Eye } from "lucide-react";
+import { Settings, Plus, RefreshCw, FilePenLine, Barcode, Download, FileText, Eye, Trash2, Package, History } from "lucide-react";
 import ProductImage from "@/components/inventory/ProductImage";
 
 
 
 export default function Inventory() {
+  // Hook de notificaciones
+  const { addNotification } = useNotifications();
+  
   // Estado para previsualización de ficha técnica
   const [sheetModal, setSheetModal] = useState<{ open: boolean, product: any | null, categoriaPrincipal: string, subcategoria: string }>({ open: false, product: null, categoriaPrincipal: '', subcategoria: '' });
   // Estado para previsualización de código de barras
@@ -34,7 +42,6 @@ export default function Inventory() {
   const [loading, setLoading] = useState(true);
   const [refreshingProducts, setRefreshingProducts] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   
   // Estado para modales
   const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
@@ -42,7 +49,13 @@ export default function Inventory() {
   const [isAttributesModalOpen, setIsAttributesModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false); // Estado para el modal de edición
   const [editingProduct, setEditingProduct] = useState<any | null>(null); // Estado para el producto en edición
+  const [deleteModal, setDeleteModal] = useState<{ open: boolean, product: any | null }>({ open: false, product: null }); // Estado para el modal de confirmación de eliminación
+  const [isDeleting, setIsDeleting] = useState(false); // Estado para indicar si se está eliminando
+  // Estados para Day 2 - Movimientos y Stock
+  const [movementModal, setMovementModal] = useState<{ open: boolean, product: any | null }>({ open: false, product: null });
+  const [historyModal, setHistoryModal] = useState<{ open: boolean, product: any | null }>({ open: false, product: null });
   const [categories, setCategories] = useState<any[]>([]);
+  const [brands, setBrands] = useState<any[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [dynamicFilters, setDynamicFilters] = useState<Record<string, string>>({});
   // Estado y ref para debounce de búsqueda
@@ -50,32 +63,66 @@ export default function Inventory() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const debounceTimeout = useRef<NodeJS.Timeout | null>(null);
 
-  // Controla si ya se intentó auto-login para evitar bucles
-  const [autoLoginAttempted, setAutoLoginAttempted] = useState(false);
-  const autoLogin = async () => {
-    const token = localStorage.getItem('authToken');
-    if (token) {
-      setIsAuthenticated(true);
-      return true;
-    }
-    if (autoLoginAttempted) {
-      // Ya se intentó, no volver a intentar
-      setLoading(false);
-      return false;
-    }
-    setAutoLoginAttempted(true);
+  // Estado de autenticación simplificado con AuthManager
+  const [isAuthenticated, setIsAuthenticated] = useState(authManager.hasValidToken());
+  
+  // Función de autenticación usando AuthManager
+  const ensureAuthenticated = async (): Promise<boolean> => {
     try {
-      await apiService.auth.login('admin@bikeshop.com', 'admin123');
-      setIsAuthenticated(true);
-      return true;
-    } catch (error: any) {
-      if (error.message && error.message.includes('429')) {
-        setError('Demasiados intentos de autenticación. Espera unos minutos antes de reintentar.');
+      const success = await authManager.ensureAuthenticated();
+      setIsAuthenticated(success);
+      
+      if (!success) {
+        const timeRemaining = authManager.getTimeUntilNextAttempt();
+        if (timeRemaining > 0) {
+          const seconds = Math.ceil(timeRemaining / 1000);
+          const message = `Esperando ${seconds}s antes del siguiente intento de autenticación`;
+          setError(message);
+          addNotification({
+            type: 'warning',
+            title: 'Autenticación en Espera',
+            message,
+            category: 'inventory'
+          });
+        } else if (authManager.isLoginInProgress()) {
+          setError('Autenticación en progreso...');
+          addNotification({
+            type: 'info',
+            title: 'Autenticando...',
+            message: 'Proceso de autenticación en progreso',
+            category: 'inventory'
+          });
+        } else {
+          setError('Error de autenticación. Inténtalo más tarde.');
+          addNotification({
+            type: 'error',
+            title: 'Error de Autenticación',
+            message: 'No se pudo autenticar con el servidor',
+            category: 'inventory'
+          });
+        }
       } else {
-        setError('Error de autenticación');
+        setError(null);
+        addNotification({
+          type: 'success',
+          title: 'Autenticación Exitosa',
+          message: 'Sesión establecida correctamente',
+          category: 'inventory'
+        });
       }
+      
+      return success;
+    } catch (error: any) {
+      console.error('Error en ensureAuthenticated:', error);
+      const message = `Error de autenticación: ${error.message || 'Error desconocido'}`;
+      setError(message);
+      addNotification({
+        type: 'error',
+        title: 'Error de Autenticación',
+        message: error.message || 'Error desconocido durante la autenticación',
+        category: 'inventory'
+      });
       setIsAuthenticated(false);
-      setLoading(false);
       return false;
     }
   };
@@ -88,12 +135,50 @@ export default function Inventory() {
       } else {
         setLoading(true);
       }
-      const data = await apiService.products.getAll(filters);
+      
+      // Asegurar autenticación antes de cargar productos
+      const authSuccess = await ensureAuthenticated();
+      if (!authSuccess) {
+        setError('No se pudo autenticar. Por favor, intenta más tarde.');
+        return;
+      }
+      
+      // Por defecto, solo mostrar productos ACTIVE (a menos que se especifique otro status)
+      const finalFilters = {
+        status: 'ACTIVE',
+        ...filters
+      };
+      
+      console.log('📡 loadProducts called with filters:', filters);
+      console.log('📡 Final filters being sent to API:', finalFilters);
+      
+      const data = await apiService.products.getAll(finalFilters);
       setProducts(data.products || []);
       setError(null);
     } catch (error: any) {
       console.error('Error cargando productos:', error);
-      setError(error.message || 'Error cargando productos');
+      
+      // Si es un error de autenticación, intentar re-autenticar
+      if (error.message.includes('Token de autenticación inválido') || error.message.includes('401')) {
+        console.log('Token inválido detectado, intentando re-autenticación...');
+        const authSuccess = await ensureAuthenticated();
+        if (authSuccess) {
+          // Reintentar cargar productos después de re-autenticación exitosa
+          try {
+            const data = await apiService.products.getAll(filters);
+            setProducts(data.products || []);
+            setError(null);
+            return;
+          } catch (retryError: any) {
+            console.error('Error en reintento de carga de productos:', retryError);
+            setError(retryError.message || 'Error cargando productos después de re-autenticación');
+          }
+        } else {
+          setError('Error de autenticación. No se pudieron cargar los productos.');
+        }
+      } else {
+        setError(error.message || 'Error cargando productos');
+      }
     } finally {
       if (isRefresh) {
         setRefreshingProducts(false);
@@ -106,10 +191,64 @@ export default function Inventory() {
   // Función para cargar categorías
   const loadCategories = async () => {
     try {
+      // Asegurar autenticación antes de cargar categorías
+      const authSuccess = await ensureAuthenticated();
+      if (!authSuccess) {
+        console.error('No se pudo autenticar para cargar categorías');
+        return;
+      }
+      
       const data = await apiService.categories.getAll();
       setCategories(data.categories || []);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error cargando categorías:', error);
+      
+      // Si es un error de autenticación, intentar re-autenticar
+      if (error.message.includes('Token de autenticación inválido') || error.message.includes('401')) {
+        console.log('Token inválido detectado al cargar categorías, intentando re-autenticación...');
+        const authSuccess = await ensureAuthenticated();
+        if (authSuccess) {
+          // Reintentar cargar categorías después de re-autenticación exitosa
+          try {
+            const data = await apiService.categories.getAll();
+            setCategories(data.categories || []);
+          } catch (retryError: any) {
+            console.error('Error en reintento de carga de categorías:', retryError);
+          }
+        }
+      }
+    }
+  };
+
+  // Función para cargar marcas
+  const loadBrands = async () => {
+    try {
+      // Asegurar autenticación antes de cargar marcas
+      const authSuccess = await ensureAuthenticated();
+      if (!authSuccess) {
+        console.error('No se pudo autenticar para cargar marcas');
+        return;
+      }
+      
+      const data = await apiService.brands.getAll();
+      setBrands(data.brands || []);
+    } catch (error: any) {
+      console.error('Error cargando marcas:', error);
+      
+      // Si es un error de autenticación, intentar re-autenticar
+      if (error.message.includes('Token de autenticación inválido') || error.message.includes('401')) {
+        console.log('Token inválido detectado al cargar marcas, intentando re-autenticación...');
+        const authSuccess = await ensureAuthenticated();
+        if (authSuccess) {
+          // Reintentar cargar marcas después de re-autenticación exitosa
+          try {
+            const data = await apiService.brands.getAll();
+            setBrands(data.brands || []);
+          } catch (retryError: any) {
+            console.error('Error en reintento de carga de marcas:', retryError);
+          }
+        }
+      }
     }
   };
 
@@ -129,44 +268,104 @@ export default function Inventory() {
     setIsEditModalOpen(true);
   };
 
+  // Función para abrir el modal de confirmación de eliminación
+  const handleDeleteClick = (product: any) => {
+    setDeleteModal({ open: true, product });
+  };
+
+  // Función para confirmar la eliminación
+  const handleConfirmDelete = async () => {
+    if (!deleteModal.product) return;
+    
+    setIsDeleting(true);
+    try {
+      await apiService.products.delete(deleteModal.product.id);
+      
+      addNotification({
+        type: 'success',
+        title: 'Producto eliminado',
+        message: `El producto "${deleteModal.product.name}" ha sido eliminado exitosamente.`
+      });
+      
+      // Cerrar modal y recargar productos
+      setDeleteModal({ open: false, product: null });
+      loadProducts();
+      
+    } catch (error: any) {
+      console.error('❌ Error eliminando producto:', error);
+      addNotification({
+        type: 'error',
+        title: 'Error al eliminar',
+        message: error.message || 'No se pudo eliminar el producto'
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   // Efecto para cargar datos al montar el componente
-  // Carga inicial y recarga por filtros, pero solo una vez
   useEffect(() => {
     const initializeData = async () => {
+      console.log('🔄 Inventario: Iniciando carga de datos...');
       setLoading(true);
-      const loginSuccess = await autoLogin();
-      if (!loginSuccess) {
+      
+      // Verificar estado inicial de autenticación
+      console.log('🔐 Inventario: Verificando estado de autenticación...');
+      console.log('🔐 Inventario: hasValidToken:', authManager.hasValidToken());
+      console.log('🔐 Inventario: isLoginInProgress:', authManager.isLoginInProgress());
+      
+      // Usar AuthManager para manejar autenticación
+      const authSuccess = await ensureAuthenticated();
+      console.log('🔐 Inventario: Resultado de autenticación:', authSuccess);
+      
+      if (!authSuccess) {
+        console.error('❌ Inventario: Fallo de autenticación');
         setLoading(false);
         return;
       }
+      
       try {
+        console.log('📦 Inventario: Cargando categorías, marcas y productos...');
         await loadCategories();
-        // Cargar productos con filtros actuales
+        await loadBrands();
         const filters: any = { ...dynamicFilters };
         if (selectedCategory) filters.categoryId = selectedCategory;
         await loadProducts(false, filters);
-      } catch (e) {
-        setError('Error cargando datos iniciales');
+        console.log('✅ Inventario: Datos cargados exitosamente');
+      } catch (e: any) {
+        console.error('❌ Inventario: Error cargando datos iniciales:', e);
+        setError(`Error cargando datos iniciales: ${e.message || 'Error desconocido'}`);
       } finally {
         setLoading(false);
       }
     };
-    if (!localStorage.getItem('authToken')) {
+
+    // Solo ejecutar si no estamos ya autenticados
+    if (!isAuthenticated && !authManager.isLoginInProgress()) {
+      console.log('🚀 Inventario: Ejecutando inicialización completa...');
       initializeData();
-    } else {
-      setIsAuthenticated(true);
+    } else if (isAuthenticated) {
+      // Si ya estamos autenticados, cargar datos directamente
+      console.log('✅ Inventario: Ya autenticado, cargando datos directamente...');
       setLoading(true);
-      loadCategories()
-        .then(() => {
-          const filters: any = { ...dynamicFilters };
-          if (selectedCategory) filters.categoryId = selectedCategory;
-          return loadProducts(false, filters);
-        })
-        .catch(() => setError('Error cargando datos iniciales'))
-        .finally(() => setLoading(false));
+      Promise.all([
+        loadCategories(),
+        loadBrands(),
+        loadProducts(false, { ...dynamicFilters, ...(selectedCategory && { categoryId: selectedCategory }) })
+      ]).then(() => {
+        console.log('✅ Inventario: Datos cargados (usuario ya autenticado)');
+      }).catch((e: any) => {
+        console.error('❌ Inventario: Error cargando datos (usuario autenticado):', e);
+        setError(`Error cargando datos: ${e.message || 'Error desconocido'}`);
+      }).finally(() => {
+        setLoading(false);
+      });
+    } else {
+      console.log('⏳ Inventario: Login en progreso, esperando...');
     }
+    
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoLoginAttempted]);
+  }, []);  // Solo ejecutar al montar
 
   // Recargar productos solo si cambian los filtros o la búsqueda debounced
   useEffect(() => {
@@ -207,16 +406,69 @@ export default function Inventory() {
       </div>
     );
   } else if (error) {
+    const isRateLimited = error.includes('Rate limit') || error.includes('429') || error.includes('Esperando');
+    const isAuthError = error.includes('Token de autenticación inválido') || error.includes('autenticación');
+    
     mainContent = (
-      <div className="flex flex-col items-center justify-center min-h-[300px]">
-        <span className="text-4xl mb-4 text-red-500">❌</span>
-        <p className="text-lg text-red-600">{error}</p>
-        <Button onClick={() => {
-          setError(null);
-          setAutoLoginAttempted(false);
-          window.location.reload();
-        }} className="mt-4">
-          Reintentar
+      <div className="flex flex-col items-center justify-center min-h-[300px] space-y-4">
+        <span className="text-4xl mb-4 text-red-500">
+          {isRateLimited ? '⏱️' : isAuthError ? '🔐' : '❌'}
+        </span>
+        <p className="text-lg text-red-600 text-center max-w-md">
+          {error}
+        </p>
+        
+        {isRateLimited ? (
+          <div className="text-center space-y-2">
+            <p className="text-sm text-gray-600">
+              El sistema está limitando las solicitudes para proteger el servidor.
+            </p>
+            <p className="text-sm text-gray-600">
+              El reintento se realizará automáticamente.
+            </p>
+          </div>
+        ) : isAuthError ? (
+          <div className="text-center space-y-2">
+            <p className="text-sm text-gray-600">
+              Problema de autenticación detectado. 
+            </p>
+            <p className="text-sm text-gray-600">
+              Haz clic en "Reintentar" para intentar una nueva autenticación.
+            </p>
+          </div>
+        ) : (
+          <div className="text-center space-y-2">
+            <p className="text-sm text-gray-600">
+              Error al cargar los datos del inventario.
+            </p>
+          </div>
+        )}
+        
+        <Button 
+          onClick={async () => {
+            setError(null);
+            setLoading(true);
+            
+            // Si es un error de autenticación, limpiar estado de AuthManager
+            if (isAuthError) {
+              authManager.clearAuth();
+            }
+            
+            const success = await ensureAuthenticated();
+            if (success) {
+              try {
+                await loadCategories();
+                await loadProducts();
+              } catch (e: any) {
+                setError(`Error cargando datos: ${e.message || 'Error desconocido'}`);
+              }
+            }
+            setLoading(false);
+          }} 
+          className="mt-4"
+          disabled={isRateLimited || authManager.isLoginInProgress()}
+        >
+          {authManager.isLoginInProgress() ? 'Autenticando...' : 'Reintentar ahora'}
         </Button>
       </div>
     );
@@ -300,47 +552,34 @@ export default function Inventory() {
           </Card>
         </div>
 
-        {/* Filtros avanzados */}
-        <Card className="enterprise-card p-6 mb-2">
-          <div className="flex flex-col md:flex-row gap-4">
-            <input
-              id="inventory-search"
-              name="inventory-search"
-              type="text"
-              placeholder="Buscar por SKU, nombre, marca o código de barras..."
-              className="enterprise-input flex-1"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
+        {/* Filtros dinámicos por atributos (mantener para compatibilidad) */}
+        {selectedCategory && (
+          <Card className="p-4 mb-4">
+            <DynamicFilters
+              categoryId={selectedCategory}
+              onFilterChange={setDynamicFilters}
             />
-            <div className="flex gap-2">
-              <select
-                id="inventory-category"
-                name="inventory-category"
-                className="enterprise-input"
-                value={selectedCategory || ''}
-                onChange={e => setSelectedCategory(e.target.value || null)}
-              >
-                <option value="">Todas las categorías</option>
-                {categories.map(cat => (
-                  <option key={cat.id} value={cat.id}>{cat.name}</option>
-                ))}
-              </select>
-              <select id="inventory-status" name="inventory-status" className="enterprise-input" onChange={e => loadProducts(false, { status: e.target.value, ...dynamicFilters, categoryId: selectedCategory })}>
-                <option value="">Todos los estados</option>
-                <option value="ACTIVE">Stock normal</option>
-                <option value="STOCK_BAJO">Stock bajo</option>
-                <option value="SIN_STOCK">Sin stock</option>
-                <option value="INACTIVE">Inactivos</option>
-              </select>
-              <Button onClick={() => loadProducts(true, { ...dynamicFilters, categoryId: selectedCategory })}>🔍 Filtrar</Button>
-            </div>
-          </div>
-          {/* Filtros dinámicos por atributos */}
-          <DynamicFilters
-            categoryId={selectedCategory}
-            onFilterChange={setDynamicFilters}
+          </Card>
+        )}
+
+        {/* Buscador avanzado */}
+        <div className="mb-4">
+          <AdvancedSearch
+            categories={categories}
+            loading={loading}
+            onSearch={async (filters: any) => {
+              // Aplicar filtros y recargar productos
+              setDynamicFilters(filters);
+              const mergedFilters = { ...filters };
+              if (selectedCategory) mergedFilters.categoryId = selectedCategory;
+              await loadProducts(false, mergedFilters);
+            }}
+            onClear={async () => {
+              setDynamicFilters({});
+              await loadProducts(false, { status: 'ACTIVE' });
+            }}
           />
-        </Card>
+        </div>
 
         {/* Products Table Mejorada */}
         <Card className="enterprise-card">
@@ -351,6 +590,12 @@ export default function Inventory() {
                 <Button variant="outline" size="sm">📥 Importar</Button>
                 <Button variant="outline" size="sm">📤 Exportar</Button>
                 <Button variant="outline" size="sm">🏷️ Etiquetas</Button>
+                <Button variant="outline" size="sm" onClick={() => setMovementModal({ open: true, product: null })}>
+                  📦 Movimientos
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setHistoryModal({ open: true, product: null })}>
+                  📊 Historial
+                </Button>
               </div>
             </div>
           </div>
@@ -423,7 +668,7 @@ export default function Inventory() {
                         <td className="p-4">
                           <div>
                             <p className="font-medium">{product.name}</p>
-                            <p className="text-sm text-foreground-secondary">{product.brand || 'Sin marca'}</p>
+                            <p className="text-sm text-foreground-secondary">{product.brand?.name || product.brand || 'Sin marca'}</p>
                           </div>
                         </td>
                         <td className="p-4">
@@ -460,6 +705,15 @@ export default function Inventory() {
                             <Button
                               variant="ghost"
                               size="icon"
+                              className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                              onClick={() => handleDeleteClick(product)}
+                              title="Eliminar Producto"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
                               className="h-8 w-8"
                               title="Ver Código de Barras"
                               onClick={() => {
@@ -472,8 +726,32 @@ export default function Inventory() {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8"
+                              title="Movimientos de Stock"
+                              onClick={() => {
+                                setMovementModal({ open: true, product });
+                              }}
+                            >
+                              <Package className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              title="Historial de Stock"
+                              onClick={() => {
+                                setHistoryModal({ open: true, product });
+                              }}
+                            >
+                              <History className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
                               title="Ficha Técnica"
                               onClick={() => {
+                                console.log('🔍 Product data for sheet:', product);
+                                
                                 // Lógica para categoría y subcategoría igual que en la tabla
                                 let categoriaPrincipal = 'Sin categoría principal';
                                 let subcategoria = 'Sin subcategoría';
@@ -487,7 +765,22 @@ export default function Inventory() {
                                     subcategoria = 'Sin subcategoría';
                                   }
                                 }
-                                setSheetModal({ open: true, product, categoriaPrincipal, subcategoria });
+                                
+                                // Crear una versión sanitizada del producto
+                                const sanitizedProduct = {
+                                  sku: product.sku || '',
+                                  name: product.name || '',
+                                  brand: product.brand,
+                                  category: product.category,
+                                  images: product.images || [],
+                                  attributes: product.attributes || [],
+                                  salePrice: product.salePrice,
+                                  costPrice: product.costPrice,
+                                  stock: product.stock
+                                };
+                                
+                                console.log('🧹 Sanitized product:', sanitizedProduct);
+                                setSheetModal({ open: true, product: sanitizedProduct, categoriaPrincipal, subcategoria });
                               }}
                             >
                               <Eye className="h-4 w-4" />
@@ -585,7 +878,7 @@ export default function Inventory() {
                       <div style="width:100%;max-width:320px;text-align:left;">
                         <div><strong>SKU:</strong> <span style="font-family:monospace;">${sheetModal.product.sku}</span></div>
                         <div><strong>Nombre:</strong> ${sheetModal.product.name}</div>
-                        <div><strong>Marca:</strong> ${sheetModal.product.brand || 'Sin marca'}</div>
+                        <div><strong>Marca:</strong> ${sheetModal.product.brand?.name || sheetModal.product.brand || 'Sin marca'}</div>
                         <div><strong>Categoría:</strong> ${sheetModal.categoriaPrincipal}</div>
                         <div><strong>Subcategoría:</strong> ${sheetModal.subcategoria}</div>
                       </div>
@@ -621,41 +914,19 @@ export default function Inventory() {
           <DialogHeader>
             <DialogTitle>Previsualización de imagen</DialogTitle>
           </DialogHeader>
-          {previewImage && (() => {
-            let finalUrl = previewImage;
-            if (previewImage.startsWith('http')) {
-              // URL absoluta
-              finalUrl = previewImage;
-            } else if (previewImage.startsWith('/uploads')) {
-              // Servir archivos estáticos directamente desde el host base (sin /api)
-              const apiUrl = apiService.getApiUrl();
-              // Extraer solo el host base (sin /api)
-              const url = new URL(apiUrl);
-              finalUrl = `${url.origin}${previewImage}`;
-            } else {
-              // Otros casos, usar apiService.getApiUrl()
-              finalUrl = `${apiService.getApiUrl()}${previewImage.startsWith('/') ? previewImage : `/${previewImage}`}`;
-            }
-            return (
-              <div>
-                <img
-                  src={finalUrl}
-                  alt="Previsualización"
-                  className="w-full h-auto rounded shadow border"
-                  style={{ maxHeight: 400, objectFit: 'contain' }}
-                  onError={e => {
-                    e.currentTarget.style.display = 'none';
-                    const msg = document.getElementById('img-error-msg');
-                    if (msg) msg.style.display = 'block';
-                  }}
-                />
-                <div id="img-error-msg" style={{display: 'none'}} className="mt-4 text-center text-destructive">
-                  No se pudo cargar la imagen.<br />
-                  Verifica la URL final o revisa la consola del navegador.
-                </div>
-              </div>
-            );
-          })()}
+          {previewImage && (
+            <div className="flex items-center justify-center">
+              <ProductImage
+                src={previewImage}
+                alt="Previsualización"
+                className="w-full h-auto rounded shadow border max-h-96 object-contain"
+                style={{ maxHeight: '400px' }}
+                onError={() => {
+                  console.error('Error loading preview image:', previewImage);
+                }}
+              />
+            </div>
+          )}
         </DialogContent>
       </Dialog>
       {/* Modales */}
@@ -684,6 +955,155 @@ export default function Inventory() {
           onProductUpdated={handleProductUpdated}
         />
       )}
+
+      {/* Modal de confirmación de eliminación */}
+      <Dialog open={deleteModal.open} onOpenChange={(open) => setDeleteModal({ open, product: deleteModal.product })}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Trash2 className="h-5 w-5 text-destructive" />
+              Confirmar Eliminación
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-foreground-secondary mb-4">
+              ¿Estás seguro de que deseas eliminar el siguiente producto?
+            </p>
+            {deleteModal.product && (
+              <div className="bg-muted p-4 rounded-lg border">
+                <div className="flex items-center gap-3">
+                  {deleteModal.product.images && deleteModal.product.images.length > 0 ? (
+                    <ProductImage 
+                      src={deleteModal.product.images[0]} 
+                      alt={deleteModal.product.name}
+                    />
+                  ) : (
+                    <div className="w-12 h-12 bg-muted rounded flex items-center justify-center">
+                      <span className="text-2xl">📦</span>
+                    </div>
+                  )}
+                  <div>
+                    <p className="font-semibold">{deleteModal.product.name}</p>
+                    <p className="text-sm text-foreground-secondary">
+                      SKU: {deleteModal.product.sku}
+                    </p>
+                    <p className="text-sm text-foreground-secondary">
+                      Marca: {deleteModal.product.brand?.name || 'Sin marca'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            <p className="text-sm text-destructive mt-4 font-medium">
+              ⚠️ Esta acción no se puede deshacer. Se eliminarán todos los datos relacionados con este producto.
+            </p>
+          </div>
+          <div className="flex justify-end gap-3">
+            <Button 
+              variant="outline" 
+              onClick={() => setDeleteModal({ open: false, product: null })}
+              disabled={isDeleting}
+            >
+              Cancelar
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleConfirmDelete}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                  Eliminando...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Eliminar Producto
+                </>
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Movimientos de Stock */}
+      <Dialog open={movementModal.open} onOpenChange={(open) => !open && setMovementModal({ open: false, product: null })}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Movimientos de Stock</DialogTitle>
+            {movementModal.product && (
+              <p className="text-sm text-foreground-secondary">
+                {movementModal.product.name} (SKU: {movementModal.product.sku})
+              </p>
+            )}
+          </DialogHeader>
+          <div className="py-4">
+            {movementModal.product ? (
+              <MovementForm 
+                productId={movementModal.product.id} 
+                onSuccess={(data) => {
+                  console.log('Movimiento exitoso:', data);
+                  // Refrescar productos para mostrar stock actualizado
+                  loadProducts(true);
+                  // Cerrar modal después de un momento
+                  setTimeout(() => {
+                    setMovementModal({ open: false, product: null });
+                  }, 1500);
+                }}
+              />
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-foreground-secondary">
+                  Selecciona un producto desde la tabla para crear movimientos específicos.
+                </p>
+                <p className="text-sm text-foreground-secondary mt-2">
+                  O usa el botón "📦 Movimientos" en la barra superior para movimientos generales.
+                </p>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Historial de Stock */}
+      <Dialog open={historyModal.open} onOpenChange={(open) => !open && setHistoryModal({ open: false, product: null })}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>Historial de Stock</DialogTitle>
+            {historyModal.product && (
+              <p className="text-sm text-foreground-secondary">
+                {historyModal.product.name} (SKU: {historyModal.product.sku})
+              </p>
+            )}
+          </DialogHeader>
+          <div className="py-4 overflow-y-auto">
+            {historyModal.product ? (
+              <StockHistory 
+                productId={historyModal.product.id}
+                onError={(error) => {
+                  console.error('Error en historial:', error);
+                  addNotification({
+                    type: 'error',
+                    title: 'Error en Historial',
+                    message: error,
+                    category: 'inventory'
+                  });
+                }}
+              />
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-foreground-secondary">
+                  Selecciona un producto desde la tabla para ver su historial específico.
+                </p>
+                <p className="text-sm text-foreground-secondary mt-2">
+                  O usa el botón "📊 Historial" en la barra superior para historial general.
+                </p>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }

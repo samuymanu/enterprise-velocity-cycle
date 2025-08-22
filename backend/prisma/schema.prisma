@@ -1,34 +1,3 @@
-// ===== MARCAS =====
-model Brand {
-  id      String    @id @default(cuid())
-  name    String    @unique
-  products  Product[]
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-
-  @@map("brands")
-}
-// ===== TOKENS DE REFRESCO Y BLACKLIST =====
-model RefreshToken {
-  id       String   @id @default(cuid())
-  token    String   @unique
-  userId     String
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  ip       String?
-  userAgent  String?
-  revoked    Boolean  @default(false)
-  expiresAt  DateTime
-  createdAt  DateTime @default(now())
-  revokedAt  DateTime?
-  replacedBy String?
-
-  @@index([userId])
-  @@index([expiresAt])
-  @@map("refresh_tokens")
-}
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -38,127 +7,169 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ===== USUARIOS Y AUTENTICACIÓN =====
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  username  String   @unique
-  password  String
-  firstName String
-  lastName  String
-  role      UserRole @default(EMPLOYEE)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relaciones
-  sales         Sale[]
-  serviceOrders ServiceOrder[]
-  inventoryMoves InventoryMove[]
-  refreshTokens  RefreshToken[]
+  id                    String          @id @default(cuid())
+  email                 String          @unique
+  username              String          @unique
+  password              String
+  firstName             String
+  lastName              String
+  role                  UserRole        @default(EMPLOYEE)
+  isActive              Boolean         @default(true)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+  inventoryMoves        InventoryMove[]
+  createdMovements      InventoryMove[] @relation("InventoryMoveCreator")
+  updatedMovements      InventoryMove[] @relation("InventoryMoveUpdater")
+  refreshTokens         RefreshToken[]
+  sales                 Sale[]
+  serviceOrders         ServiceOrder[]  @relation("ServiceOrderTechnician")
+  savedSearches         SavedSearch[]
+  searchHistory         SearchHistory[]
+  searchAnalytics       SearchAnalytics[]
 
   @@map("users")
 }
 
-enum UserRole {
-  ADMIN
-  MANAGER
-  EMPLOYEE
-  TECHNICIAN
-  CASHIER
+model RefreshToken {
+  id         String    @id @default(cuid())
+  token      String    @unique
+  userId     String
+  ip         String?
+  userAgent  String?
+  revoked    Boolean   @default(false)
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+  revokedAt  DateTime?
+  replacedBy String?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
 }
 
-// ===== CLIENTES =====
 model Customer {
-  id             String      @id @default(cuid())
-  documentType   String      // CI, RIF, Passport
-  documentNumber String      @unique
+  id             String         @id @default(cuid())
+  documentType   DocumentType
+  documentNumber String         @unique
   firstName      String?
   lastName       String?
   companyName    String?
-  customerType   CustomerType @default(INDIVIDUAL)
-  email          String?
+  customerType   CustomerType
   phone          String?
+  email          String?
   address        String?
   city           String?
   state          String?
-  postalCode     String?
-  creditLimit    Decimal     @default(0) @db.Decimal(10, 2)
-  currentBalance Decimal     @default(0) @db.Decimal(10, 2)
-  isActive       Boolean     @default(true)
+  country        String         @default("Venezuela")
+  isActive       Boolean        @default(true)
   notes          String?
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
-
-  // Relaciones
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
   sales          Sale[]
-  serviceOrders ServiceOrder[]
+  serviceOrders  ServiceOrder[]
 
   @@map("customers")
 }
 
-enum CustomerType {
-  INDIVIDUAL
-  COMPANY
+model Brand {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  products  Product[]
+
+  @@map("brands")
 }
 
-// ===== PRODUCTOS E INVENTARIO =====
 model Category {
-  id          String    @id @default(cuid())
-  name        String    
-  description String?
-  code        String?   // Código de 3 letras para generación de SKU (ej: BIC, MOT, ACC)
-  isActive    Boolean   @default(true)
-  
-  // Jerarquía de categorías
-  parentId    String?   // ID de la categoría padre (null para categorías principales)
-  level       Int       @default(0) // 0 = Principal, 1 = Subcategoría, etc.
-  path        String?   // Ruta jerárquica ej: "Bicicletas/Mountain Bike"
-  
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-
-  // Relaciones
-  parent      Category? @relation("CategoryHierarchy", fields: [parentId], references: [id])
-  children    Category[] @relation("CategoryHierarchy")
-  products    Product[]
+  id                 String              @id @default(cuid())
+  name               String
+  description        String?
+  code               String              @unique
+  isActive           Boolean             @default(true)
+  parentId           String?
+  level              Int                 @default(0)
+  path               String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  parent             Category?           @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children           Category[]          @relation("CategoryHierarchy")
   categoryAttributes CategoryAttribute[]
+  products           Product[]
 
-  // Índices para optimizar consultas jerárquicas
-  @@index([parentId])
-  @@index([level])
-  @@unique([name, parentId]) // Nombres únicos dentro del mismo nivel padre
   @@map("categories")
 }
 
+model Attribute {
+  id                 String                  @id @default(cuid())
+  name               String                  @unique
+  type               AttributeType
+  unit               String?
+  helpText           String?
+  isGlobal           Boolean                 @default(false)
+  dependsOn          String?
+  minValue           Float?
+  maxValue           Float?
+  regex              String?
+  options            String[]
+  description        String?
+  isActive           Boolean                 @default(true)
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  categoryAttributes CategoryAttribute[]
+  productValues      ProductAttributeValue[]
 
+  @@index([isGlobal])
+  @@index([isActive])
+  @@map("attributes")
+}
+
+model CategoryAttribute {
+  id          String    @id @default(cuid())
+  categoryId  String
+  attributeId String
+  isRequired  Boolean   @default(false)
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  attribute   Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  category    Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryId, attributeId])
+  @@index([categoryId])
+  @@index([attributeId])
+  @@map("category_attributes")
+}
 
 model Product {
-  id           String      @id @default(cuid())
-  sku          String      @unique
-  name         String
-  description  String?
-  brandId      String?
-  brand        Brand?    @relation(fields: [brandId], references: [id])
-  costPrice    Float    @default(0)
-  salePrice    Float
-  stock        Int      @default(0)
-  minStock     Int      @default(10)
-  maxStock     Int?
-  barcode      String?
-  status       String   @default("ACTIVE") // ACTIVE, INACTIVE, DISCONTINUED
-  images       String[]
-  tags         String[]
-
-  datasheetUrl String? // Nuevo campo para la ficha técnica
-  metadata     Json?   // Nuevo campo para metadatos flexibles
-
-  categoryId  String?
-  category    Category? @relation(fields: [categoryId], references: [id])
-  saleItems    SaleItem[]
-  inventoryMoves InventoryMove[]
+  id                String                  @id @default(cuid())
+  sku               String                  @unique
+  name              String
+  description       String?
+  brandId           String?
+  costPrice         Float                   @default(0)
+  salePrice         Float
+  stock             Int                     @default(0)
+  minStock          Int                     @default(10)
+  maxStock          Int?
+  barcode           String?
+  status            ProductStatus           @default(ACTIVE)
+  images            String[]
+  tags              String[]
+  datasheetUrl      String?
+  metadata          Json?
+  categoryId        String?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  inventoryMoves    InventoryMove[]
+  attributeValues   ProductAttributeValue[]
+  stockReservations StockReservation[]
+  alerts           Alert[]
+  brand             Brand?                  @relation(fields: [brandId], references: [id])
+  category          Category?               @relation(fields: [categoryId], references: [id])
+  saleItems         SaleItem[]
   serviceOrderItems ServiceOrderItem[]
-  attributeValues ProductAttributeValue[]
 
   @@index([categoryId])
   @@index([name])
@@ -168,56 +179,70 @@ model Product {
   @@map("products")
 }
 
-enum ProductStatus {
-  ACTIVE
-  INACTIVE
-  DISCONTINUED
+model ProductAttributeValue {
+  id          String    @id @default(cuid())
+  productId   String
+  attributeId String
+  value       String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  attribute   Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, attributeId])
+  @@index([productId])
+  @@index([attributeId])
+  @@map("product_attribute_values")
 }
 
-// ===== MOVIMIENTOS DE INVENTARIO =====
 model InventoryMove {
-  id          String          @id @default(cuid())
+  id          String            @id @default(cuid())
   productId   String
   type        InventoryMoveType
   quantity    Int
   reason      String?
   userId      String
-  createdAt   DateTime        @default(now())
+  notes       String?           // Notas adicionales del movimiento
+  referenceId String?           // ID de referencia (ej: número de factura, orden de compra)
+  batchNumber String?           // Número de lote
+  expiryDate  DateTime?         // Fecha de vencimiento para productos perecederos
+  cost        Decimal?          @db.Decimal(10, 2) // Costo unitario del producto al momento del movimiento
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  createdBy   String?           // Usuario que creó el registro (puede ser diferente al userId)
+  updatedBy   String?           // Usuario que actualizó el registro por última vez
+  
+  product     Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user        User              @relation(fields: [userId], references: [id])
+  creator     User?             @relation("InventoryMoveCreator", fields: [createdBy], references: [id])
+  updater     User?             @relation("InventoryMoveUpdater", fields: [updatedBy], references: [id])
 
-  // Relaciones
-  product Product @relation(fields: [productId], references: [id])
-  user    User    @relation(fields: [userId], references: [id])
-
+  @@index([productId])
+  @@index([type])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([productId, createdAt])
+  @@index([type, createdAt])
   @@map("inventory_moves")
 }
 
-enum InventoryMoveType {
-  IN
-  OUT
-  ADJUSTMENT
-  TRANSFER
-}
-
-// ===== VENTAS =====
 model Sale {
-  id            String      @id @default(cuid())
-  saleNumber    String      @unique
+  id            String        @id @default(cuid())
+  saleNumber    String        @unique
   customerId    String
   userId        String
-  subtotal      Decimal     @db.Decimal(10, 2)
-  tax           Decimal     @db.Decimal(10, 2)
-  discount      Decimal     @default(0) @db.Decimal(10, 2)
-  total         Decimal     @db.Decimal(10, 2)
+  subtotal      Decimal       @db.Decimal(10, 2)
+  tax           Decimal       @db.Decimal(10, 2)
+  discount      Decimal       @default(0) @db.Decimal(10, 2)
+  total         Decimal       @db.Decimal(10, 2)
   paymentMethod PaymentMethod
-  status        SaleStatus @default(COMPLETED)
+  status        SaleStatus    @default(COMPLETED)
   notes         String?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-
-  // Relaciones
-  customer  Customer    @relation(fields: [customerId], references: [id])
-  user      User        @relation(fields: [userId], references: [id])
-  saleItems SaleItem[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  saleItems     SaleItem[]
+  customer      Customer      @relation(fields: [customerId], references: [id])
+  user          User          @relation(fields: [userId], references: [id])
 
   @@map("sales")
 }
@@ -229,12 +254,103 @@ model SaleItem {
   quantity  Int
   unitPrice Decimal @db.Decimal(10, 2)
   total     Decimal @db.Decimal(10, 2)
-
-  // Relaciones
-  sale    Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id])
+  product   Product @relation(fields: [productId], references: [id])
+  sale      Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
 
   @@map("sale_items")
+}
+
+model ServiceOrder {
+  id                 String               @id @default(cuid())
+  orderNumber        String               @unique
+  customerId         String
+  technicianId       String
+  vehicleType        String
+  vehicleBrand       String?
+  vehicleModel       String?
+  vehicleYear        String?
+  vehiclePlate       String?
+  problemDescription String
+  diagnosis          String?
+  solution           String?
+  laborCost          Decimal              @default(0) @db.Decimal(10, 2)
+  partsCost          Decimal              @default(0) @db.Decimal(10, 2)
+  totalCost          Decimal              @default(0) @db.Decimal(10, 2)
+  status             ServiceOrderStatus   @default(RECEIVED)
+  priority           ServiceOrderPriority @default(NORMAL)
+  estimatedDate      DateTime?
+  completedDate      DateTime?
+  deliveredDate      DateTime?
+  notes              String?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  serviceItems       ServiceOrderItem[]
+  customer           Customer             @relation(fields: [customerId], references: [id])
+  technician         User                 @relation("ServiceOrderTechnician", fields: [technicianId], references: [id])
+
+  @@map("service_orders")
+}
+
+model ServiceOrderItem {
+  id             String       @id @default(cuid())
+  serviceOrderId String
+  productId      String
+  quantity       Int
+  unitPrice      Decimal      @db.Decimal(10, 2)
+  total          Decimal      @db.Decimal(10, 2)
+  product        Product      @relation(fields: [productId], references: [id])
+  serviceOrder   ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+
+  @@map("service_order_items")
+}
+
+model SystemConfig {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("system_config")
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+enum DocumentType {
+  CI
+  RIF
+  PASSPORT
+}
+
+enum CustomerType {
+  INDIVIDUAL
+  COMPANY
+}
+
+enum AttributeType {
+  STRING
+  NUMBER
+  BOOLEAN
+  LIST
+  DATE
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+  DISCONTINUED
+}
+
+enum InventoryMoveType {
+  IN
+  OUT
+  ADJUSTMENT
+  TRANSFER
 }
 
 enum PaymentMethod {
@@ -250,55 +366,6 @@ enum SaleStatus {
   COMPLETED
   CANCELLED
   REFUNDED
-}
-
-// ===== TALLER DE SERVICIOS =====
-model ServiceOrder {
-  id                String              @id @default(cuid())
-  orderNumber       String              @unique
-  customerId        String
-  technicianId      String
-  vehicleType       String
-  vehicleBrand      String?
-  vehicleModel      String?
-  vehicleYear       String?
-  vehiclePlate      String?
-  problemDescription String
-  diagnosis         String?
-  solution          String?
-  laborCost         Decimal             @default(0) @db.Decimal(10, 2)
-  partsCost         Decimal             @default(0) @db.Decimal(10, 2)
-  totalCost         Decimal             @default(0) @db.Decimal(10, 2)
-  status            ServiceOrderStatus  @default(RECEIVED)
-  priority          ServiceOrderPriority @default(NORMAL)
-  estimatedDate     DateTime?
-  completedDate     DateTime?
-  deliveredDate     DateTime?
-  notes             String?
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-
-  // Relaciones
-  customer    Customer            @relation(fields: [customerId], references: [id])
-  technician  User                @relation(fields: [technicianId], references: [id])
-  serviceItems ServiceOrderItem[]
-
-  @@map("service_orders")
-}
-
-model ServiceOrderItem {
-  id             String  @id @default(cuid())
-  serviceOrderId String
-  productId      String
-  quantity       Int
-  unitPrice      Decimal @db.Decimal(10, 2)
-  total          Decimal @db.Decimal(10, 2)
-
-  // Relaciones
-  serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
-  product      Product      @relation(fields: [productId], references: [id])
-
-  @@map("service_order_items")
 }
 
 enum ServiceOrderStatus {
@@ -317,85 +384,124 @@ enum ServiceOrderPriority {
   URGENT
 }
 
-// ===== SISTEMA DE ATRIBUTOS DINÁMICOS =====
-model Attribute {
-  id           String      @id @default(cuid())
-  name         String      @unique // ej: "Tamaño de rueda", "Color", "Material"
-  type         AttributeType
-  unit         String?     // opcional, ej: "cm", "kg"
-  helpText     String?     // ayuda contextual para el usuario
-  isGlobal     Boolean     @default(false) // si el atributo es global para todos los productos
-  dependsOn    String?     // id de atributo del que depende
-  minValue     Float?      // para NUMBER
-  maxValue     Float?      // para NUMBER
-  regex        String?     // para STRING, validación por expresión regular
-  options      String[]    // array de strings, solo si type = LIST
-  description  String?
-  isActive     Boolean     @default(true)
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-
-  // Relaciones
-  categoryAttributes CategoryAttribute[]
-  productValues      ProductAttributeValue[]
-
-  @@index([isGlobal])
-  @@index([isActive])
-  @@map("attributes")
+enum StockReservationStatus {
+  ACTIVE
+  EXPIRED
+  RELEASED
+  CONSUMED
 }
 
-enum AttributeType {
-  STRING
-  NUMBER
-  BOOLEAN
-  LIST
-  DATE
+enum AlertType {
+  LOW_STOCK
+  OUT_OF_STOCK
+  OVERSTOCK
+  EXPIRING_STOCK
+  SYSTEM_ERROR
+  PERFORMANCE_WARNING
 }
 
-model CategoryAttribute {
-  id          String   @id @default(cuid())
-  categoryId  String
-  attributeId String
-  isRequired  Boolean  @default(false)
-  sortOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
-
-  // Relaciones
-  category  Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  attribute Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
-
-  @@unique([categoryId, attributeId])
-  @@index([categoryId])
-  @@index([attributeId])
-  @@map("category_attributes")
+enum AlertPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
 }
 
-model ProductAttributeValue {
-  id          String   @id @default(cuid())
-  productId   String
-  attributeId String
-  value       String   // Almacenamos todo como string y convertimos según el tipo
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  // Relaciones
-  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
-  attribute Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
-
-  @@unique([productId, attributeId])
-  @@index([productId])
-  @@index([attributeId])
-  @@map("product_attribute_values")
-}
-
-// ===== CONFIGURACIONES DEL SISTEMA =====
-model SystemConfig {
-  id          String @id @default(cuid())
-  key         String @unique
-  value       String
+// Modelos para funcionalidades avanzadas de búsqueda
+model SavedSearch {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String
   description String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  filters     Json      // Almacena los filtros como JSON
+  isPublic    Boolean   @default(false)
+  tags        String[]  @default([])
+  usageCount  Int       @default(0)
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@map("system_config")
+  @@index([userId])
+  @@index([isPublic])
+  @@index([lastUsedAt])
+  @@map("saved_searches")
+}
+
+model SearchHistory {
+  id          String   @id @default(cuid())
+  userId      String
+  query       String
+  filters     Json     // Almacena los filtros como JSON
+  resultCount Int
+  executedAt  DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([executedAt])
+  @@map("search_history")
+}
+
+model SearchAnalytics {
+  id             String   @id @default(cuid())
+  searchTerm     String
+  filterType     String?
+  resultCount    Int
+  clickedResults String[] @default([])
+  sessionId      String?
+  userId         String?
+  timestamp      DateTime @default(now())
+  user           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([searchTerm])
+  @@index([timestamp])
+  @@index([userId])
+  @@map("search_analytics")
+}
+
+model StockReservation {
+  id          String                    @id @default(cuid())
+  productId   String
+  quantity    Int
+  reservedBy  String
+  reason      String
+  status      StockReservationStatus    @default(ACTIVE)
+  expiresAt   DateTime?
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+  
+  product     Product                   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([status])
+  @@index([expiresAt])
+  @@index([productId, status])
+  @@map("stock_reservations")
+}
+
+model Alert {
+  id          String        @id @default(cuid())
+  productId   String?
+  type        AlertType
+  priority    AlertPriority
+  title       String
+  message     String
+  threshold   Int?          // Para alertas de stock
+  currentValue Int?         // Valor actual que disparó la alerta
+  isActive    Boolean       @default(true)
+  resolvedAt  DateTime?
+  resolvedBy  String?
+  metadata    Json?         // Datos adicionales específicos del tipo de alerta
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  product     Product?      @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([type])
+  @@index([priority])
+  @@index([isActive])
+  @@index([createdAt])
+  @@index([productId, isActive])
+  @@map("alerts")
 }

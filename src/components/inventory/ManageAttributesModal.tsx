@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Trash2, Plus, Edit } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { apiService } from "@/lib/api";
 
 interface Attribute {
   id: string;
@@ -87,17 +88,12 @@ export function ManageAttributesModal({ isOpen, onClose, categories }: ManageAtt
   const fetchAttributes = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/attributes', {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setAttributes(data.attributes);
-      }
+      console.log('🔄 Cargando atributos...');
+      const data = await apiService.attributes.getAllAttributes();
+      console.log('✅ Atributos cargados:', data);
+      setAttributes(data.attributes || []);
     } catch (error) {
+      console.error('❌ Error cargando atributos:', error);
       toast({
         title: "Error",
         description: "No se pudieron cargar los atributos",
@@ -214,7 +210,7 @@ export function ManageAttributesModal({ isOpen, onClose, categories }: ManageAtt
         method,
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
+          Authorization: `Bearer ${localStorage.getItem('authToken')}`
         },
         body: JSON.stringify(body)
       });
@@ -261,7 +257,7 @@ export function ManageAttributesModal({ isOpen, onClose, categories }: ManageAtt
       const response = await fetch(`/api/attributes/${attribute.id}`, {
         method: 'DELETE',
         headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`
+          Authorization: `Bearer ${localStorage.getItem('authToken')}`
         }
       });
 
@@ -298,10 +294,10 @@ export function ManageAttributesModal({ isOpen, onClose, categories }: ManageAtt
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[70vh]">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[75vh]">
           {/* Lista de atributos */}
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
+          <div className="space-y-4 flex flex-col">
+            <div className="flex justify-between items-center flex-shrink-0">
               <h3 className="text-lg font-medium">Atributos existentes</h3>
               <Button onClick={startCreating} size="sm">
                 <Plus className="h-4 w-4 mr-2" />
@@ -309,7 +305,12 @@ export function ManageAttributesModal({ isOpen, onClose, categories }: ManageAtt
               </Button>
             </div>
 
-            <div className="overflow-y-auto h-full border rounded-lg">
+            <div 
+              className="flex-1 border rounded-lg bg-gray-50/30 custom-scroll force-scroll" 
+              style={{ 
+                maxHeight: 'calc(75vh - 120px)'
+              }}
+            >
               {loading ? (
                 <div className="p-4 text-center">Cargando...</div>
               ) : attributes.length === 0 ? (
@@ -386,8 +387,8 @@ export function ManageAttributesModal({ isOpen, onClose, categories }: ManageAtt
 
           {/* Formulario */}
           {isCreating && (
-            <div className="space-y-4">
-              <div className="flex justify-between items-center">
+            <div className="space-y-4 flex flex-col">
+              <div className="flex justify-between items-center flex-shrink-0">
                 <h3 className="text-lg font-medium">
                   {editingAttribute ? 'Editar atributo' : 'Crear atributo'}
                 </h3>
@@ -396,7 +397,13 @@ export function ManageAttributesModal({ isOpen, onClose, categories }: ManageAtt
                 </Button>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-4 overflow-y-auto h-full">
+              <div 
+                className="flex-1 bg-gray-50/30 rounded-lg p-2 custom-scroll force-scroll" 
+                style={{ 
+                  maxHeight: 'calc(75vh - 120px)'
+                }}
+              >
+                <form onSubmit={handleSubmit} className="space-y-4 pr-2">
                 <div className="space-y-2">
                   <Label htmlFor="name">Nombre</Label>
                   <Input
@@ -554,7 +561,8 @@ export function ManageAttributesModal({ isOpen, onClose, categories }: ManageAtt
                 <Button type="submit" className="w-full">
                   {editingAttribute ? 'Actualizar atributo' : 'Crear atributo'}
                 </Button>
-              </form>
+                </form>
+              </div>
             </div>
           )}
         </div>

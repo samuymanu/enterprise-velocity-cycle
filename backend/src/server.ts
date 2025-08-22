@@ -16,26 +16,30 @@ import multer from 'multer';
 import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
 import productRoutes from './routes/products';
+import productStockRoutes from './routes/productStockRoutes';
+import auditRoutes from './routes/auditRoutes';
 import categoryRoutes from './routes/categories';
 import brandRoutes from './routes/brands';
 import customerRoutes from './routes/customers';
 import saleRoutes from './routes/sales';
 import serviceOrderRoutes from './routes/serviceOrders';
 import inventoryRoutes from './routes/inventory';
+import inventoryMovementRoutes from './routes/inventoryMovements';
 import dashboardRoutes from './routes/dashboard';
 import attributeRoutes from './routes/attributes';
+import searchRoutes from './routes/search';
 
 // Importar middleware
-// Asegúrate de que el archivo exista en './middleware/errorHandler.ts' o corrige la ruta/nombre si es necesario
+// Asegrate de que el archivo exista en './middleware/errorHandler.ts' o corrige la ruta/nombre si es necesario
 // import { errorHandler } from './middleware/errorHandler';
-// Asegúrate de que el archivo exista o corrige la ruta a la ubicación correcta
-// Ejemplo si está en 'middlewares' en vez de 'middleware':
+// Asegrate de que el archivo exista o corrige la ruta a la ubicacin correcta
+// Ejemplo si est en 'middlewares' en vez de 'middleware':
 // import { errorHandler } from './middlewares/errorHandler';
 
 import { errorHandler } from './middleware/errorHandler';
 import { authMiddleware } from './middleware/auth';
 
-// Validar y cargar configuración de entorno
+// Validar y cargar configuracin de entorno
 const env = getEnvConfig();
 
 const app = express();
@@ -48,7 +52,7 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Configuración de Multer para subida de imágenes
+// Configuracin de Multer para subida de imgenes
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, uploadsDir);
@@ -62,7 +66,7 @@ const storage = multer.diskStorage({
 const upload = multer({ 
   storage: storage,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB límite
+    fileSize: 5 * 1024 * 1024, // 5MB lmite
   },
   fileFilter: (req, file, cb) => {
     const allowedTypes = /jpeg|jpg|png|gif|webp/;
@@ -72,7 +76,7 @@ const upload = multer({
     if (mimetype && extname) {
       return cb(null, true);
     } else {
-      cb(new Error('Solo se permiten imágenes (jpeg, jpg, png, gif, webp)'));
+      cb(new Error('Solo se permiten imgenes (jpeg, jpg, png, gif, webp)'));
     }
   }
 });
@@ -97,7 +101,7 @@ const limiter = rateLimit({
   windowMs: rateLimitConfig.windowMs,
   max: rateLimitConfig.max,
   message: {
-    error: 'Demasiadas solicitudes, intenta de nuevo más tarde'
+    error: 'Demasiadas solicitudes, intenta de nuevo ms tarde'
   }
 });
 
@@ -122,7 +126,7 @@ app.use(helmet({
   hsts: env.NODE_ENV === 'production' ? { maxAge: 63072000, includeSubDomains: true, preload: true } : false,
 }));
 
-// Redirección a HTTPS en producción
+// Redireccin a HTTPS en produccin
 if (env.NODE_ENV === 'production') {
   app.use((req, res, next) => {
     if (req.headers['x-forwarded-proto'] !== 'https') {
@@ -131,10 +135,10 @@ if (env.NODE_ENV === 'production') {
     next();
   });
 }
-app.use(compression()); // Compresión
+app.use(compression()); // Compresin
 app.use(morgan('dev')); // Logs
 
-// Configuración de CORS robusta y única
+// Configuracin de CORS robusta y nica
 const allowedOrigins = [
   'http://localhost:8080',
   'http://localhost:3000',
@@ -151,7 +155,7 @@ app.use(cors({
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     } else {
-      // Permitir cualquier origen para pruebas remotas (comentar en producción)
+      // Permitir cualquier origen para pruebas remotas (comentar en produccin)
       // return callback(new Error('No permitido por CORS'), false);
       return callback(null, true);
     }
@@ -162,7 +166,7 @@ app.use(cors({
   exposedHeaders: ['Authorization']
 }));
 
-// Servir archivos estáticos con CORS para todos los orígenes permitidos
+// Servir archivos estticos con CORS para todos los orgenes permitidos
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads'), {
   setHeaders: (res, path, stat) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -170,15 +174,14 @@ app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads'), {
   }
 }));
 
-// Rutas que manejan multipart/form-data (con Multer)
-// Estas deben ir ANTES de express.json()
-app.use('/api/products', productRoutes);
-app.use('/api/categories', categoryRoutes);
 
 // Middlewares globales que procesan JSON y URL-encoded.
-// Ahora se aplican después de las rutas de archivos.
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Rutas que manejan multipart/form-data (con Multer)
+app.use('/api/products', productRoutes);
+app.use('/api/categories', categoryRoutes);
 
 // Aplicar rate limiting a todas las rutas restantes
 app.use('/api', limiter);
@@ -186,13 +189,29 @@ app.use('/api', limiter);
 // Definir otras rutas de la API
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/products-stock', authMiddleware, productStockRoutes);
+app.use('/api/audit', authMiddleware, auditRoutes);
 app.use('/api/brands', brandRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/sales', saleRoutes);
 app.use('/api/service-orders', serviceOrderRoutes);
 app.use('/api/inventory', inventoryRoutes);
+app.use('/api/inventory-movements', inventoryMovementRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/attributes', attributeRoutes);
+app.use('/api/search', searchRoutes);
+
+// Ruta de salud
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    message: 'BikeShop ERP Backend est funcionando',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development',
+    version: '1.0.0'
+  });
+});
 
 // Middleware de manejo de errores (debe ir al final)
 app.use(errorHandler);
@@ -227,7 +246,7 @@ io.on('connection', (socket) => {
   });
 });
 
-// Exportar io para usar en otros módulos
+// Exportar io para usar en otros mdulos
 export { io };
 
 // Iniciar servidor

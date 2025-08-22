@@ -1,4 +1,5 @@
 // Script para verificar productos directamente
+require('dotenv').config();
 const http = require('http');
 
 const makeRequest = (path, method = 'GET', data = null, token = null) => {
@@ -40,8 +41,8 @@ const checkProductsData = async () => {
   try {
     // Login
     const loginResult = await makeRequest('/api/auth/login', 'POST', {
-      identifier: 'admin@bikeshop.com',
-      password: 'admin123'
+      identifier: process.env.ADMIN_EMAIL,
+      password: process.env.ADMIN_PASSWORD
     });
     
     const token = loginResult.data.token;

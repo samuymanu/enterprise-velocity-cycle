@@ -47,10 +47,36 @@ router.post('/',
   validateBody(createCategorySchema),
   async (req: any, res: any) => {
     try {
-      const { name, description } = req.body;
+      const { name, description, code } = req.body;
+
+      // Generar código automáticamente si no se proporciona
+      let categoryCode = code;
+      if (!categoryCode) {
+        // Generar código de 3 letras basado en el nombre
+        categoryCode = name
+          .toUpperCase()
+          .replace(/[^A-Z]/g, '')
+          .substring(0, 3)
+          .padEnd(3, 'X');
+        
+        // Verificar si el código ya existe y generar uno único
+        let counter = 1;
+        let originalCode = categoryCode;
+        while (await prisma.category.findFirst({ where: { code: categoryCode } })) {
+          if (counter < 10) {
+            categoryCode = originalCode.substring(0, 2) + counter;
+          } else {
+            categoryCode = originalCode.substring(0, 1) + String(counter).padStart(2, '0');
+          }
+          counter++;
+          if (counter > 999) {
+            throw new Error('No se pudo generar un código único para la categoría');
+          }
+        }
+      }
 
     const category = await prisma.category.create({
-      data: { name, description }
+      data: { name, description, code: categoryCode }
     });
 
     res.status(201).json({
@@ -94,10 +120,34 @@ router.post('/subcategory',
       });
     }
 
+    // Generar un código único para la subcategoría basado en el nombre
+    const codeBase = name.toLowerCase()
+      .replace(/[^a-z0-9]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+    
+    let code = codeBase;
+    let counter = 1;
+    
+    // Verificar que el código sea único
+    while (true) {
+      const existingCategory = await prisma.category.findUnique({
+        where: { code }
+      });
+      
+      if (!existingCategory) {
+        break;
+      }
+      
+      code = `${codeBase}-${counter}`;
+      counter++;
+    }
+
     const subcategory = await prisma.category.create({
       data: { 
         name, 
         description,
+        code,
         parentId,
         level: parentCategory.level + 1
       }

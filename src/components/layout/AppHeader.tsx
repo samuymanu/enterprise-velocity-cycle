@@ -1,6 +1,7 @@
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { NotificationButton } from "@/components/ui/notification-center";
 
 export function AppHeader() {
   return (
@@ -41,6 +42,9 @@ export function AppHeader() {
             </span>
           </div>
         </div>
+
+        {/* Notifications */}
+        <NotificationButton />
 
         {/* User Menu */}
         <Button variant="ghost" size="sm" className="flex items-center gap-2">

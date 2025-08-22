@@ -27,115 +27,91 @@ async function main() {
   console.log('✅ Usuario administrador creado:', admin.email);
 
   // Crear categorías principales
-  const bicicletasCategory = await prisma.category.upsert({
-    where: { 
-      id: 'bicicletas-main' // Usamos un ID específico
-    },
-    update: {},
-    create: { 
-      id: 'bicicletas-main',
-      name: 'Bicicletas', 
+  const bicicletasCategory = await prisma.category.create({
+    data: {
+      name: 'Bicicletas',
       description: 'Bicicletas de todo tipo',
+      code: 'BIC',
       level: 0,
-      path: 'Bicicletas'
-    }
+      path: 'Bicicletas',
+    },
   });
 
-  const motocicletasCategory = await prisma.category.upsert({
-    where: { 
-      id: 'motocicletas-main'
-    },
-    update: {},
-    create: { 
-      id: 'motocicletas-main',
-      name: 'Motocicletas', 
+  const motocicletasCategory = await prisma.category.create({
+    data: {
+      name: 'Motocicletas',
       description: 'Motocicletas y scooters',
+      code: 'MOT',
       level: 0,
-      path: 'Motocicletas'
-    }
+      path: 'Motocicletas',
+    },
   });
 
-  const repuestosCategory = await prisma.category.upsert({
-    where: { 
-      id: 'repuestos-main'
-    },
-    update: {},
-    create: { 
-      id: 'repuestos-main',
-      name: 'Repuestos', 
+  const repuestosCategory = await prisma.category.create({
+    data: {
+      name: 'Repuestos',
       description: 'Repuestos y partes',
+      code: 'REP',
       level: 0,
-      path: 'Repuestos'
-    }
+      path: 'Repuestos',
+    },
   });
 
-  const accesoriosCategory = await prisma.category.upsert({
-    where: { 
-      id: 'accesorios-main'
-    },
-    update: {},
-    create: { 
-      id: 'accesorios-main',
-      name: 'Accesorios', 
+  const accesoriosCategory = await prisma.category.create({
+    data: {
+      name: 'Accesorios',
       description: 'Accesorios varios',
+      code: 'ACC',
       level: 0,
-      path: 'Accesorios'
-    }
+      path: 'Accesorios',
+    },
   });
 
   const mainCategories = [bicicletasCategory, motocicletasCategory, repuestosCategory, accesoriosCategory];
 
   // Crear subcategorías para Bicicletas
   await Promise.all([
-      prisma.category.upsert({
-        where: { id: 'mountain-bike-sub' },
-        update: {},
-        create: {
-          id: 'mountain-bike-sub',
-          name: 'Mountain Bike',
-          description: 'Bicicletas para montaña',
-          parentId: bicicletasCategory.id,
-          level: 1,
-          path: 'Bicicletas/Mountain Bike'
-        }
-      }),
-      prisma.category.upsert({
-        where: { id: 'ruta-sub' },
-        update: {},
-        create: {
-          id: 'ruta-sub',
-          name: 'Ruta',
-          description: 'Bicicletas de carretera',
-          parentId: bicicletasCategory.id,
-          level: 1,
-          path: 'Bicicletas/Ruta'
-        }
-      }),
-      prisma.category.upsert({
-        where: { id: 'bmx-sub' },
-        update: {},
-        create: {
-          id: 'bmx-sub',
-          name: 'BMX',
-          description: 'Bicicletas BMX',
-          parentId: bicicletasCategory.id,
-          level: 1,
-          path: 'Bicicletas/BMX'
-        }
-      }),
-      prisma.category.upsert({
-        where: { id: 'cauchos-bici-sub' },
-        update: {},
-        create: {
-          id: 'cauchos-bici-sub',
-          name: 'Cauchos de Bicicleta',
-          description: 'Llantas y cauchos para bicicleta',
-          parentId: bicicletasCategory.id,
-          level: 1,
-          path: 'Bicicletas/Cauchos de Bicicleta'
-        }
-      })
-    ]);
+    prisma.category.create({
+      data: {
+        name: 'Mountain Bike',
+        description: 'Bicicletas para montaña',
+        code: 'MTB',
+        parentId: bicicletasCategory.id,
+        level: 1,
+        path: 'Bicicletas/Mountain Bike',
+      },
+    }),
+    prisma.category.create({
+      data: {
+        name: 'Ruta',
+        description: 'Bicicletas de carretera',
+        code: 'RUT',
+        parentId: bicicletasCategory.id,
+        level: 1,
+        path: 'Bicicletas/Ruta',
+      },
+    }),
+    prisma.category.create({
+      data: {
+        name: 'BMX',
+        description: 'Bicicletas BMX',
+        code: 'BMX',
+        parentId: bicicletasCategory.id,
+        level: 1,
+        path: 'Bicicletas/BMX',
+      },
+    }),
+    prisma.category.create({
+      data: {
+        name: 'Cauchos de Bicicleta',
+        description: 'Llantas y cauchos para bicicleta',
+        code: 'CAU',
+        parentId: bicicletasCategory.id,
+        level: 1,
+        path: 'Bicicletas/Cauchos de Bicicleta',
+      },
+    }),
+  ]);
 
   // Crear subcategorías para Repuestos
   await Promise.all([
@@ -146,6 +122,7 @@ async function main() {
           id: 'frenos-sub',
           name: 'Frenos',
           description: 'Sistemas de frenos y pastillas',
+          code: 'FRE',
           parentId: repuestosCategory.id,
           level: 1,
           path: 'Repuestos/Frenos'
@@ -158,6 +135,7 @@ async function main() {
           id: 'cadenas-sub',
           name: 'Cadenas',
           description: 'Cadenas y transmisión',
+          code: 'CAD',
           parentId: repuestosCategory.id,
           level: 1,
           path: 'Repuestos/Cadenas'
@@ -174,6 +152,7 @@ async function main() {
           id: 'cascos-sub',
           name: 'Cascos',
           description: 'Cascos de protección',
+          code: 'ACS',
           parentId: accesoriosCategory.id,
           level: 1,
           path: 'Accesorios/Cascos'
@@ -186,6 +165,7 @@ async function main() {
           id: 'luces-sub',
           name: 'Luces',
           description: 'Iluminación y luces',
+          code: 'LUC',
           parentId: accesoriosCategory.id,
           level: 1,
           path: 'Accesorios/Luces'
@@ -323,8 +303,7 @@ async function main() {
       phone: '+58 412-1234567',
       address: 'Av. Principal #123',
       city: 'Caracas',
-      state: 'Distrito Capital',
-      creditLimit: 1000.00
+      state: 'Distrito Capital'
     }
   });
 

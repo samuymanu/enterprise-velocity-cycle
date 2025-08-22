@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { apiService } from "@/lib/api";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -63,23 +64,31 @@ export function CategoryAttributesModal({ isOpen, onClose, category }: CategoryA
 
   const fetchCategoryAttributes = async () => {
     if (!category) return;
-
     try {
       setLoading(true);
-      const response = await fetch(`/api/attributes/category/${category.id}`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`
+      const data = await apiService.categoryAttributes.getByCategory(category.id);
+      // La API devuelve un formato diferente, necesitamos mapear los datos
+      const mappedAttributes = data.attributes?.map((attr: any) => ({
+        id: `${category.id}-${attr.id}`, // ID único para la asignación
+        categoryId: category.id,
+        attributeId: attr.id,
+        isRequired: attr.isRequired || attr.categoryAssignment?.isRequired || false,
+        sortOrder: attr.sortOrder || attr.categoryAssignment?.sortOrder || 0,
+        attribute: {
+          id: attr.id,
+          name: attr.name,
+          type: attr.type,
+          unit: attr.unit,
+          options: attr.options || [],
+          description: attr.description,
+          isActive: attr.isActive
         }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setCategoryAttributes(data.attributes);
-      }
-    } catch (error) {
+      })) || [];
+      setCategoryAttributes(mappedAttributes);
+    } catch (error: any) {
       toast({
         title: "Error",
-        description: "No se pudieron cargar los atributos de la categoría",
+        description: error.message || "No se pudieron cargar los atributos de la categoría",
         variant: "destructive"
       });
     } finally {
@@ -89,20 +98,13 @@ export function CategoryAttributesModal({ isOpen, onClose, category }: CategoryA
 
   const fetchAvailableAttributes = async () => {
     try {
-      const response = await fetch('/api/attributes', {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setAvailableAttributes(data.attributes.filter((attr: Attribute) => attr.isActive));
-      }
-    } catch (error) {
+      const data = await apiService.categoryAttributes.getAllAttributes();
+      // La API devuelve { success: true, attributes: [...] }
+      setAvailableAttributes((data.attributes || []).filter((attr: Attribute) => attr.isActive));
+    } catch (error: any) {
       toast({
         title: "Error",
-        description: "No se pudieron cargar los atributos disponibles",
+        description: error.message || "No se pudieron cargar los atributos disponibles",
         variant: "destructive"
       });
     }
@@ -110,40 +112,19 @@ export function CategoryAttributesModal({ isOpen, onClose, category }: CategoryA
 
   const assignAttribute = async () => {
     if (!category || !selectedAttributeId) return;
-
     try {
-      const response = await fetch(`/api/attributes/${selectedAttributeId}/categories`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          categoryIds: [category.id],
-          isRequired
-        })
+      await apiService.categoryAttributes.assign(category.id, selectedAttributeId, isRequired, categoryAttributes.length + 1);
+      toast({
+        title: "Éxito",
+        description: "Atributo asignado a la categoría",
       });
-
-      if (response.ok) {
-        toast({
-          title: "Éxito",
-          description: "Atributo asignado a la categoría",
-        });
-        fetchCategoryAttributes();
-        setSelectedAttributeId('');
-        setIsRequired(false);
-      } else {
-        const error = await response.json();
-        toast({
-          title: "Error",
-          description: error.message || "Error al asignar atributo",
-          variant: "destructive"
-        });
-      }
-    } catch (error) {
+      fetchCategoryAttributes();
+      setSelectedAttributeId('');
+      setIsRequired(false);
+    } catch (error: any) {
       toast({
         title: "Error",
-        description: "Error de conexión",
+        description: error.message || "Error al asignar atributo",
         variant: "destructive"
       });
     }
@@ -151,37 +132,18 @@ export function CategoryAttributesModal({ isOpen, onClose, category }: CategoryA
 
   const unassignAttribute = async (attributeId: string) => {
     if (!category) return;
-
-    if (!confirm('¿Está seguro de desasignar este atributo de la categoría?')) {
-      return;
-    }
-
+    if (!confirm('¿Está seguro de desasignar este atributo de la categoría?')) return;
     try {
-      const response = await fetch(`/api/attributes/${attributeId}/categories/${category.id}`, {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        }
+      await apiService.categoryAttributes.unassign(category.id, attributeId);
+      toast({
+        title: "Éxito",
+        description: "Atributo desasignado de la categoría",
       });
-
-      if (response.ok) {
-        toast({
-          title: "Éxito",
-          description: "Atributo desasignado de la categoría",
-        });
-        fetchCategoryAttributes();
-      } else {
-        const error = await response.json();
-        toast({
-          title: "Error",
-          description: error.message || "Error al desasignar atributo",
-          variant: "destructive"
-        });
-      }
-    } catch (error) {
+      fetchCategoryAttributes();
+    } catch (error: any) {
       toast({
         title: "Error",
-        description: "Error de conexión",
+        description: error.message || "Error al desasignar atributo",
         variant: "destructive"
       });
     }
