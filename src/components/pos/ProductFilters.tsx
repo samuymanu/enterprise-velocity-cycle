@@ -3,7 +3,7 @@ import { apiService } from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { Filter, X } from 'lucide-react';
 
-export function ProductFilters() {
+export function ProductFilters({ onCollapse, onExpand, collapsed }: { onCollapse?: () => void; onExpand?: () => void; collapsed?: boolean }) {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [attributes, setAttributes] = useState<any[]>([]);
   const [attributeFilters, setAttributeFilters] = useState<Record<string, string[]>>({});
@@ -72,6 +72,33 @@ export function ProductFilters() {
 
   const hasActiveFilters = Object.values(attributeFilters).some(values => values.length > 0);
 
+  // If the panel is collapsed, render a compact rail with an expand button so the user can open it again
+  if (collapsed) {
+    return (
+      <div className="w-full">
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden">
+          <div className="p-2 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Filter className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Filtros</h3>
+            </div>
+            <div className="flex items-center gap-2">
+              {onExpand ? (
+                <button
+                  onClick={onExpand}
+                  className="px-2 py-1 text-xs border rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  title="Mostrar filtros"
+                >
+                  Mostrar
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full">
       <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm hover:shadow-md transition-all duration-200">
@@ -82,11 +109,22 @@ export function ProductFilters() {
               <Filter className="h-4 w-4 text-blue-600 dark:text-blue-400" />
               <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Filtros</h3>
             </div>
-            {hasActiveFilters && (
-              <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2">
+              {hasActiveFilters && (
                 <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
                   {Object.values(attributeFilters).flat().length}
                 </span>
+              )}
+              {onCollapse ? (
+                <button
+                  onClick={onCollapse}
+                  className="px-2 py-1 text-xs border rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  title="Colapsar panel de filtros"
+                >
+                  Ocultar
+                </button>
+              ) : null}
+              {hasActiveFilters && (
                 <button
                   onClick={clearAllFilters}
                   className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition-colors"
@@ -94,8 +132,8 @@ export function ProductFilters() {
                 >
                   <X className="h-3 w-3 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" />
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
 

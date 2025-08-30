@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSidebar } from "@/components/ui/sidebar";
 import { NavLink, useLocation } from "react-router-dom";
 import { Package, ShoppingCart, Users, BarChart2, Settings, Wrench, User, ChevronDown, ChevronRight, Home, DollarSign, ShoppingBag } from "lucide-react";
 
@@ -83,42 +84,74 @@ export function AppSidebar() {
 		].some((p) => location.pathname.startsWith(p))
 	);
 
+	// Estado del provider (toggle desde el botón del header)
+	let open = true;
+	let setSidebarOpen: ((v: boolean) => void) | null = null;
+	try {
+		// El hook solo funciona si estamos dentro del provider; en SSR o pruebas puede fallar.
+		// Se envuelve en try para evitar errores fuera de contexto.
+		const sidebar = useSidebar();
+		open = sidebar.open;
+		setSidebarOpen = sidebar.setOpen;
+	} catch (e) {
+		// noop: deja open = true por defecto
+	}
+
+	const collapsed = !open;
+	const asideBase = "h-screen bg-white border-r flex flex-col select-none transition-all duration-200 ease-in-out";
+	const asideExpanded = "w-64 translate-x-0";
+	const asideCollapsed = "w-16 overflow-hidden pointer-events-auto";
+
 	return (
-		<aside className="h-screen w-64 bg-white border-r flex flex-col select-none">
+		<aside
+			className={`${asideBase} ${collapsed ? asideCollapsed : asideExpanded}`}
+			data-collapsed={collapsed}
+			aria-hidden={collapsed}
+		>
 			{/* Logo */}
-			<div className="flex items-center gap-3 px-6 py-6 border-b">
+			<div className={"flex items-center " + (collapsed ? "justify-center py-4 border-b" : "gap-3 px-6 py-6 border-b") }>
 				<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-500 text-white text-xl font-bold">
 					<Package className="w-6 h-6" />
 				</div>
-				<div className="flex flex-col">
-					<span className="text-lg font-bold text-blue-900">BikeShop</span>
-					<span className="text-xs text-blue-400">ERP System</span>
-				</div>
+				{!collapsed && (
+					<div className="flex flex-col">
+						<span className="text-lg font-bold text-blue-900">BikeShop</span>
+						<span className="text-xs text-blue-400">ERP System</span>
+					</div>
+				)}
 			</div>
 
 			{/* Menú principal */}
-			<nav className="flex-1 px-2 py-4 space-y-1">
+			<nav className={"flex-1 py-4 " + (collapsed ? "px-1 space-y-1" : "px-2 space-y-1")}>
 				{navigationItems.map((item) => {
 					if (item.children) {
 						return (
 							<div key={item.title}>
 								<button
-									className={`flex items-center w-full px-3 py-2 rounded-lg border ${
+									className={collapsed ? `flex items-center justify-center w-full py-3 rounded-lg transition` : `flex items-center w-full px-3 py-2 rounded-lg border ${
 										inventoryOpen
 											? "border-blue-400 bg-blue-50"
 											: "border-transparent"
-									} text-blue-900 font-medium focus:outline-none transition`}
-									onClick={() => setInventoryOpen((v) => !v)}
+										} text-blue-900 font-medium focus:outline-none transition`}
+									onClick={() => {
+										// If collapsed, clicking the icon should expand the sidebar
+										if (collapsed) {
+											setSidebarOpen?.(true)
+											return
+										}
+										setInventoryOpen((v) => !v)
+									}}
+									title={item.title}
 								>
-									<span className="mr-2">{item.icon}</span>
-									<span className="flex-1 text-left">{item.title}</span>
-									{inventoryOpen ? (
+									<span className={collapsed ? "" : "mr-2"}>{item.icon}</span>
+									{!collapsed && <span className="flex-1 text-left">{item.title}</span>}
+									{!collapsed && (inventoryOpen ? (
 										<ChevronDown className="w-4 h-4" />
 									) : (
 										<ChevronRight className="w-4 h-4" />
-									)}
+									))}
 								</button>
-								{inventoryOpen && (
+								{!collapsed && inventoryOpen && (
 									<div className="ml-6 mt-1 mb-2 flex flex-col gap-1 bg-white border border-blue-200 rounded-lg shadow-sm py-2">
 										{item.children.map((sub) => {
 											const isActive = location.pathname === sub.url;
@@ -127,15 +160,15 @@ export function AppSidebar() {
 													key={sub.title}
 													to={sub.url}
 													className={`px-3 py-2 rounded text-sm font-semibold transition ${
-														isActive
-															? "bg-blue-500 text-white"
-															: "text-blue-900 hover:bg-blue-100"
+													isActive
+														? "bg-blue-500 text-white"
+														: "text-blue-900 hover:bg-blue-100"
 													}`}
 												>
-													{sub.title}
+												{sub.title}
 												</NavLink>
-											);
-										})}
+												);
+											})}
 									</div>
 								)}
 							</div>
@@ -145,14 +178,20 @@ export function AppSidebar() {
 						<NavLink
 							key={item.title}
 							to={item.url}
+							onClick={() => {
+								// If collapsed, expand first so the user sees the menu
+								if (collapsed) {
+									setSidebarOpen?.(true)
+								}
+							}}
 							className={({ isActive }) =>
-								`flex items-center gap-3 px-3 py-2 rounded-lg text-blue-900 font-medium transition ${
-									isActive ? "bg-blue-100" : "hover:bg-blue-50"
-								}`
+								collapsed
+									? `flex items-center justify-center px-2 py-3 rounded-lg text-blue-900 font-medium transition ${isActive ? "bg-blue-100" : "hover:bg-blue-50"}`
+									: `flex items-center gap-3 px-3 py-2 rounded-lg text-blue-900 font-medium transition ${isActive ? "bg-blue-100" : "hover:bg-blue-50"}`
 							}
 						>
 							<span>{item.icon}</span>
-							<span>{item.title}</span>
+							{!collapsed && <span>{item.title}</span>}
 						</NavLink>
 					);
 				})}

@@ -14,6 +14,7 @@ import TestNotifications from "./pages/TestNotifications";
 import NotFound from "./pages/NotFound";
 import CategoriesPage from "./pages/categories";
 import StockManagement from "./pages/StockManagement.tsx";
+import Settings from "./pages/Settings";
 
 const queryClient = new QueryClient();
 
@@ -34,6 +35,7 @@ const App = () => (
             <Route path="/stock-management" element={<StockManagement />} />
             <Route path="/customers" element={<Customers />} />
             <Route path="/workshop" element={<Workshop />} />
+            <Route path="/settings" element={<Settings />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

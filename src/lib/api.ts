@@ -2,7 +2,53 @@
 import { useState } from 'react';
 
 // API Service para conectar con el backend
-const API_BASE_URL = import.meta.env.DEV ? '/api' : 'http://localhost:3002/api';
+const DEFAULT_API_BASE = import.meta.env.DEV ? '/api' : 'http://localhost:3002/api';
+
+// Optional runtime override (set from Settings UI)
+let overrideApiBase: string | null = null;
+
+function normalizeServerUrl(input: string) {
+  if (!input) return null;
+  let url = input.trim();
+  if (!/^https?:\/\//i.test(url)) {
+    url = 'http://' + url;
+  }
+  // remove trailing slash
+  url = url.replace(/\/+$/, '');
+  // ensure /api suffix
+  if (!url.endsWith('/api')) {
+    url = url + '/api';
+  }
+  return url;
+}
+
+function getApiBase() {
+  if (overrideApiBase) return overrideApiBase;
+  try {
+    const stored = localStorage.getItem('app:apiUrl');
+    const normalized = stored ? normalizeServerUrl(stored) : null;
+    return normalized || DEFAULT_API_BASE;
+  } catch (e) {
+    return DEFAULT_API_BASE;
+  }
+}
+
+export function setApiBaseUrl(value: string | null) {
+  try {
+    if (!value) {
+      localStorage.removeItem('app:apiUrl');
+      overrideApiBase = null;
+      return;
+    }
+    const normalized = normalizeServerUrl(value as string);
+    if (normalized) {
+      localStorage.setItem('app:apiUrl', value as string);
+      overrideApiBase = normalized;
+    }
+  } catch (e) {
+    console.warn('setApiBaseUrl error', e);
+  }
+}
 
 // Storage para el token
 let authToken: string | null = localStorage.getItem('authToken');
@@ -214,7 +260,7 @@ const apiRequest = async (
     }
 
     const response = await withRetry(async () => {
-      return fetch(`${API_BASE_URL}${endpoint}`, {
+      return fetch(`${getApiBase()}${endpoint}`, {
         ...requestOptions,
         headers: {
           ...headers,
@@ -242,9 +288,18 @@ const apiRequest = async (
     if (!response.ok) {
       // Si es 401, intentar refrescar token y reintentar una vez
       if (response.status === 401) {
+        // Logging temporal para debugging
+        let bodyText = null;
+        try { 
+          bodyText = await response.clone().text(); 
+        } catch(e) {
+          bodyText = 'No se pudo leer body';
+        }
+        console.debug('[API][401] url=', `${getApiBase()}${endpoint}`, 'body=', bodyText, 'headers=', Object.fromEntries(response.headers.entries()));
+
         try {
           console.debug('[API] 401 recibido, intentando refresh token automático');
-          const refreshed = await (apiService as any).tryRefreshAuth();
+          let refreshed = await (apiService as any).tryRefreshAuth();
           if (!refreshed) {
             console.debug('[API] Refresh no disponible o falló, intentando login automático vía AuthManager');
             try {
@@ -254,7 +309,7 @@ const apiRequest = async (
                 const ok = await authManager.ensureAuthenticated();
                 console.debug('[API] authManager.ensureAuthenticated result:', ok);
                 if (ok) {
-                  // reconstruir headers con nuevo token
+                  refreshed = true; // mark as refreshed so we retry
                 } else {
                   console.debug('[API] authManager no pudo re-autenticar');
                 }
@@ -264,14 +319,14 @@ const apiRequest = async (
             }
           }
 
-          if (refreshed || true) { // intentar reintento: si refreshed==true ya tenemos token; si authManager reautenticó, también
+          if (refreshed) { // solo reintentar si realmente se refrescó o authManager re-autenticó
             // reconstruir headers con nuevo token
             const retryHeaders: HeadersInit = getHeaders();
             if (requestOptions.body instanceof FormData) {
               delete (retryHeaders as any)['Content-Type'];
             }
 
-            const retryResponse = await fetch(`${API_BASE_URL}${endpoint}`, {
+            const retryResponse = await fetch(`${getApiBase()}${endpoint}`, {
               ...requestOptions,
               headers: {
                 ...retryHeaders,
@@ -294,7 +349,7 @@ const apiRequest = async (
 
             if (!retryResponse.ok) {
               const error = handleApiError(retryResponse, retryData);
-              if (showErrorNotification) {
+              if (showErrorNotification && retryResponse.status !== 404) {
                 notify({ type: 'error', title: `Error ${retryResponse.status}`, message: error.message, category: 'api' });
               }
               throw error;
@@ -326,7 +381,7 @@ const apiRequest = async (
       }
 
       const error = handleApiError(response, data);
-      if (showErrorNotification) {
+      if (showErrorNotification && response.status !== 404) {
         notify({ type: 'error', title: `Error ${response.status}`, message: error.message, category: 'api' });
       }
       throw error;
@@ -388,16 +443,12 @@ const handleApiError = (response: Response, data: any): Error => {
     // El authManager se encargará de la re-autenticación automática
     localStorage.removeItem('authToken');
     authToken = null;
-    
-    // Notificar específicamente sobre el problema de autenticación
-    notifyError(
-      'Token de Autenticación Inválido',
-      'El token de sesión ha expirado o es inválido. Se intentará re-autenticar automáticamente.',
-      { category: 'api' }
-    );
-    
-    // No redirigir automáticamente, dejar que el authManager maneje la situación
-    return new Error('Token de autenticación inválido o expirado');
+  // No notificar aquí para evitar duplicar mensajes.
+  // La función que invocó apiRequest decidirá si mostrar notificación
+  // (controlada por el flag showErrorNotification).
+  // Limpiar token y devolver error para que el caller lo procese.
+  // Incluir una pista para el usuario sobre pasos a seguir.
+  return new Error('Token de autenticación inválido o expirado');
   }
 
   if (response.status === 403) {
@@ -405,7 +456,8 @@ const handleApiError = (response: Response, data: any): Error => {
   }
 
   if (response.status === 404) {
-    return new Error('El recurso solicitado no fue encontrado.');
+  // Añadir sugerencia útil para troubleshooting (p. ej. URL del servidor)
+  return new Error('El recurso solicitado no fue encontrado. Verifica la URL del servidor en Ajustes o que el backend esté corriendo.');
   }
 
   if (response.status === 422) {
@@ -455,7 +507,7 @@ export const apiService = {
   /**
    * Configuración y utilidades
    */
-  getApiUrl: () => API_BASE_URL,
+  getApiUrl: () => getApiBase(),
   
   // Obtener URL base para archivos estáticos (sin /api)
   getBaseUrl: () => {
@@ -523,7 +575,7 @@ export const apiService = {
     if (!refreshTokenStored) return false;
     try {
       console.debug('[AUTH] Intentando refresh desde cliente');
-      const resp = await fetch(`${API_BASE_URL}/auth/refresh`, {
+  const resp = await fetch(`${getApiBase()}/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken: refreshTokenStored })
@@ -969,10 +1021,11 @@ export const apiService = {
           .map(([key, value]) => [key, String(value)])
       ).toString();
       
-      return apiRequest(`/customers${queryString ? `?${queryString}` : ''}`, {
+      return apiRequest(`/test-customers${queryString ? `?${queryString}` : ''}`, {
         cache: true,
         cacheTtl: 2 * 60 * 1000,
-        loadingMessage: 'Cargando clientes...'
+        loadingMessage: 'Cargando clientes...',
+        showErrorNotification: false // evitar popup 404 al listar
       });
     },
 
@@ -1007,6 +1060,28 @@ export const apiService = {
         method: 'DELETE',
         showSuccessNotification: true
       });
+    }
+    ,
+    import: async (file: File) => {
+      const fd = new FormData();
+      fd.append('file', file);
+      return apiRequest('/customers/import', {
+        method: 'POST',
+        body: fd,
+        showSuccessNotification: true,
+        loadingMessage: 'Importando clientes...'
+      });
+    },
+    export: async () => {
+      const base = getApiBase();
+      const resp = await fetch(`${base}/customers/export`, {
+        headers: {
+          ...(localStorage.getItem('authToken') ? { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` } : {})
+        }
+      });
+      if (!resp.ok) throw new Error('Error al exportar clientes');
+      const blob = await resp.blob();
+      return blob;
     }
   },
 
@@ -1074,6 +1149,106 @@ export const apiService = {
       return apiRequest(`/inventory/products/${productId}/stock`, {
         method: 'PUT',
         body: JSON.stringify({ quantity, reason }),
+        showSuccessNotification: true
+      });
+    }
+  },
+
+  // Créditos/Apartados
+  credits: {
+    /**
+     * Obtener créditos de un cliente (temporal sin auth)
+     */
+    getByCustomer: async (customerId: string) => {
+      return apiRequest(`/test-credits/${customerId}`, {
+        cache: true,
+        cacheTtl: 1 * 60 * 1000,
+        loadingMessage: 'Cargando créditos...'
+      });
+    },
+
+    /**
+     * Obtener un crédito por ID
+     */
+    getById: async (id: string) => {
+      return apiRequest(`/credits/${id}`, {
+        cache: true,
+        cacheTtl: 1 * 60 * 1000
+      });
+    },
+
+    /**
+     * Crear un crédito
+     */
+    create: async (creditData: any) => {
+      return apiRequest('/credits', {
+        method: 'POST',
+        body: JSON.stringify(creditData),
+        showSuccessNotification: true,
+        loadingMessage: 'Creando crédito...'
+      });
+    },
+
+    /**
+     * Actualizar un crédito
+     */
+    update: async (id: string, creditData: any) => {
+      return apiRequest(`/credits/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(creditData),
+        showSuccessNotification: true
+      });
+    },
+
+    /**
+     * Eliminar un crédito
+     */
+    delete: async (id: string) => {
+      return apiRequest(`/credits/${id}`, {
+        method: 'DELETE',
+        showSuccessNotification: true
+      });
+    },
+
+    /**
+     * Marcar crédito como pagado
+     */
+    markPaid: async (id: string) => {
+      return apiRequest(`/credits/${id}/mark-paid`, {
+        method: 'POST',
+        showSuccessNotification: true
+      });
+    },
+
+    /**
+     * Agregar abono
+     */
+    addInstallment: async (creditId: string, installmentData: any) => {
+      return apiRequest(`/credits/${creditId}/installments`, {
+        method: 'POST',
+        body: JSON.stringify(installmentData),
+        showSuccessNotification: true,
+        loadingMessage: 'Agregando abono...'
+      });
+    },
+
+    /**
+     * Editar abono
+     */
+    updateInstallment: async (id: string, installmentData: any) => {
+      return apiRequest(`/credits/installments/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(installmentData),
+        showSuccessNotification: true
+      });
+    },
+
+    /**
+     * Eliminar abono
+     */
+    deleteInstallment: async (id: string) => {
+      return apiRequest(`/credits/installments/${id}`, {
+        method: 'DELETE',
         showSuccessNotification: true
       });
     }

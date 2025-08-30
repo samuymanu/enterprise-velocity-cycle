@@ -1,5 +1,5 @@
 import { PrismaClient, AlertType, AlertPriority, ProductStatus } from '@prisma/client';
-import { logger } from '../logger';
+import logger from '../logger';
 
 const prisma = new PrismaClient();
 

@@ -174,7 +174,7 @@ export class AlertService {
         if (filters.dateTo) where.createdAt.lte = filters.dateTo;
       }
 
-      const alerts = await this.prisma.alert.findMany({
+  const alerts = await this.prisma.alert.findMany({
         where,
         include: {
           product: true
@@ -185,7 +185,9 @@ export class AlertService {
         ]
       });
 
-      return alerts;
+  // Filtrar cualquier alerta sin producto para satisfacer el tipo AlertWithProduct
+  const filtered = alerts.filter((a): a is AlertWithProduct => a.product !== null);
+  return filtered;
       
     } catch (error) {
       logger.error('Error getting active alerts:', error);

@@ -1,6 +1,87 @@
 generator client {
   provider = "prisma-client-js"
 }
+// --- MODELOS DE CRÉDITO, ABONO Y APARTADO ---
+
+model Credit {
+  id            String      @id @default(cuid())
+  customerId    String
+  saleId        String   @unique
+  amount        Decimal     @db.Decimal(10,2)
+  dueDate       DateTime
+  status        CreditStatus
+  notes         String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  customer      Customer    @relation(fields: [customerId], references: [id])
+  sale          Sale        @relation(fields: [saleId], references: [id])
+  installments  Installment[]
+
+  @@index([customerId])
+  @@index([saleId])
+}
+
+enum CreditStatus {
+  PENDIENTE
+  PAGADO
+  VENCIDO
+  ELIMINADO
+}
+
+model Installment {
+  id         String     @id @default(cuid())
+  creditId   String
+  date       DateTime
+  amount     Decimal    @db.Decimal(10,2)
+  method     PaymentMethod
+  notes      String?
+  createdAt  DateTime   @default(now())
+
+  credit     Credit     @relation(fields: [creditId], references: [id])
+
+  @@index([creditId])
+}
+
+model Layaway {
+  id            String      @id @default(cuid())
+  customerId    String
+  saleId        String   @unique
+  amount        Decimal     @db.Decimal(10,2)
+  dueDate       DateTime
+  status        LayawayStatus
+  notes         String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  customer      Customer    @relation(fields: [customerId], references: [id])
+  sale          Sale        @relation(fields: [saleId], references: [id])
+  payments      LayawayPayment[]
+
+  @@index([customerId])
+  @@index([saleId])
+}
+
+enum LayawayStatus {
+  ACTIVO
+  COMPLETADO
+  CANCELADO
+  ELIMINADO
+}
+
+model LayawayPayment {
+  id         String     @id @default(cuid())
+  layawayId  String
+  date       DateTime
+  amount     Decimal    @db.Decimal(10,2)
+  method     PaymentMethod
+  notes      String?
+  createdAt  DateTime   @default(now())
+
+  layaway    Layaway    @relation(fields: [layawayId], references: [id])
+
+  @@index([layawayId])
+}
 
 datasource db {
   provider = "postgresql"
@@ -69,6 +150,8 @@ model Customer {
   updatedAt      DateTime       @updatedAt
   sales          Sale[]
   serviceOrders  ServiceOrder[]
+  credits        Credit[]
+  layaways       Layaway[]
 
   @@map("customers")
 }
@@ -243,6 +326,8 @@ model Sale {
   saleItems     SaleItem[]
   customer      Customer      @relation(fields: [customerId], references: [id])
   user          User          @relation(fields: [userId], references: [id])
+  credit        Credit?
+  layaway       Layaway?
 
   @@map("sales")
 }

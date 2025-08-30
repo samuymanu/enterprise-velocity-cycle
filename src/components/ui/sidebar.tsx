@@ -80,9 +80,6 @@ const SidebarProvider = React.forwardRef<
         } else {
           _setOpen(openState)
         }
-
-        // This sets the cookie to keep the sidebar state.
-        document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
       },
       [setOpenProp, open]
     )
@@ -217,21 +214,6 @@ const Sidebar = React.forwardRef<
   ) => {
     const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
 
-    if (collapsible === "none") {
-      return (
-        <div
-          className={cn(
-            "flex h-full w-[--sidebar-width] flex-col bg-sidebar text-sidebar-foreground",
-            className
-          )}
-          ref={ref}
-          {...props}
-        >
-          {children}
-        </div>
-      )
-    }
-
     if (isMobile) {
       return (
         <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
@@ -252,44 +234,34 @@ const Sidebar = React.forwardRef<
       )
     }
 
+    const collapsed = state === 'collapsed'
     return (
       <div
         ref={ref}
-        className="group peer hidden md:block text-sidebar-foreground"
+        className={cn("hidden md:block text-sidebar-foreground relative", className)}
         data-state={state}
-        data-collapsible={collapsible}
-        data-variant={variant}
         data-side={side}
       >
-        {/* This is what handles the sidebar gap on desktop */}
+        {/* Spacer that shrinks when collapsed */}
         <div
           className={cn(
-            "duration-200 relative h-svh w-[--sidebar-width] bg-transparent transition-[width] ease-linear",
-            "group-data-[collapsible=offcanvas][data-state=collapsed]:w-0",
-            "group-data-[side=right]:rotate-180",
-            variant === "floating" || variant === "inset"
-              ? "group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4))]"
-              : "group-data-[collapsible=icon]:w-[--sidebar-width-icon]"
+            "transition-all duration-200 h-svh inline-block align-top",
+            collapsed ? "w-0" : "w-[--sidebar-width]",
           )}
         />
+        {/* Actual sidebar panel */}
         <div
           className={cn(
-            "duration-200 fixed inset-y-0 z-10 hidden h-svh w-[--sidebar-width] transition-[left,right,width] ease-linear md:flex",
-            side === "left"
-              ? "left-0 group-data-[collapsible=offcanvas][data-state=collapsed]:left-[calc(var(--sidebar-width)*-1)]"
-              : "right-0 group-data-[collapsible=offcanvas][data-state=collapsed]:right-[calc(var(--sidebar-width)*-1)]",
-            // Adjust the padding for floating and inset variants.
-            variant === "floating" || variant === "inset"
-              ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4)_+2px)]"
-              : "group-data-[collapsible=icon]:w-[--sidebar-width-icon] group-data-[side=left]:border-r group-data-[side=right]:border-l",
-            className
+            "fixed inset-y-0 z-10 h-svh w-[--sidebar-width] md:flex hidden flex-col bg-sidebar border-r border-sidebar-border transition-transform duration-200 ease-linear",
+            side === 'left' && !collapsed && "translate-x-0 left-0",
+            side === 'left' && collapsed && "-translate-x-full left-0",
+            side === 'right' && !collapsed && "translate-x-0 right-0",
+            side === 'right' && collapsed && "translate-x-full right-0",
+            variant === 'floating' && "m-2 rounded-lg border border-sidebar-border shadow",
           )}
           {...props}
         >
-          <div
-            data-sidebar="sidebar"
-            className="flex h-full w-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow"
-          >
+          <div data-sidebar="sidebar" className="flex h-full w-full flex-col">
             {children}
           </div>
         </div>
@@ -305,19 +277,6 @@ const SidebarTrigger = React.forwardRef<
 >(({ className, onClick, ...props }, ref) => {
   const { toggleSidebar } = useSidebar()
 
-  const handleDomToggle = () => {
-    try {
-      const root = document.documentElement
-      const current = root.getAttribute('data-sidebar-open') === 'true'
-      const next = !current
-      root.setAttribute('data-sidebar-open', String(next))
-      window.dispatchEvent(new CustomEvent('app:sidebarToggled', { detail: { open: next } }))
-    } catch (err) {
-      // no-op in non-DOM environments
-      console.warn('Sidebar DOM toggle failed', err)
-    }
-  }
-
   return (
     <Button
       ref={ref}
@@ -327,9 +286,6 @@ const SidebarTrigger = React.forwardRef<
       className={cn("h-7 w-7", className)}
       onClick={(event) => {
         onClick?.(event)
-        // toggle a nivel de DOM para compatibilidad con listeners externos
-        handleDomToggle()
-        // avisar al contexto interno para que actualice su estado
         toggleSidebar()
       }}
       {...props}

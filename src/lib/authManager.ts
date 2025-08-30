@@ -59,17 +59,24 @@ class AuthManager {
 
   private async performLogin(): Promise<boolean> {
     console.log('AuthManager: Intentando login automático...');
-    
+
+    // Sólo intentar login automático en entorno de desarrollo.
+    // En producción no debemos usar credenciales hardcodeadas.
     try {
+      if (!(import.meta && import.meta.env && import.meta.env.DEV)) {
+        console.warn('AuthManager: Auto-login deshabilitado fuera de DEV.');
+        return false;
+      }
+
       // Importación dinámica para evitar dependencias circulares
       const apiModule = await import('./api');
       const apiService = apiModule.apiService;
-      
+
       const result = await apiService.auth.login('admin@bikeshop.com', 'DevAdmin@2025!');
       console.log('AuthManager: Login exitoso', result);
       return true;
     } catch (error: any) {
-      console.error('AuthManager: Error en login:', error);
+      console.error('AuthManager: Error en login automático:', error);
       
       // Verificar si es un error de red
       if (error.message.includes('fetch') || error.message.includes('NetworkError')) {

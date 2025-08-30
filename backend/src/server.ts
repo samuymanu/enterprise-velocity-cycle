@@ -20,7 +20,8 @@ import productStockRoutes from './routes/productStockRoutes';
 import auditRoutes from './routes/auditRoutes';
 import categoryRoutes from './routes/categories';
 import brandRoutes from './routes/brands';
-import customerRoutes from './routes/customers';
+import customerRoutes, { testRouter as customersTestRouter } from './routes/customers';
+import creditsRoutes, { testRouter as creditsTestRouter } from './routes/credits';
 import saleRoutes from './routes/sales';
 import serviceOrderRoutes from './routes/serviceOrders';
 import inventoryRoutes from './routes/inventory';
@@ -155,9 +156,11 @@ app.use(cors({
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     } else {
-      // Permitir cualquier origen para pruebas remotas (comentar en produccin)
-      // return callback(new Error('No permitido por CORS'), false);
-      return callback(null, true);
+      // En desarrollo permitir cualquier origen, en producción rechazar
+      if (env.NODE_ENV === 'development') {
+        return callback(null, true);
+      }
+      return callback(new Error('No permitido por CORS'), false);
     }
   },
   credentials: true,
@@ -166,10 +169,10 @@ app.use(cors({
   exposedHeaders: ['Authorization']
 }));
 
-// Servir archivos estticos con CORS para todos los orgenes permitidos
+// Servir archivos estticos con CORS dinámico (no wildcard + credentials)
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads'), {
   setHeaders: (res, path, stat) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    // No usar wildcard con credentials - usar origin dinámico
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   }
 }));
@@ -193,6 +196,9 @@ app.use('/api/products-stock', authMiddleware, productStockRoutes);
 app.use('/api/audit', authMiddleware, auditRoutes);
 app.use('/api/brands', brandRoutes);
 app.use('/api/customers', customerRoutes);
+app.use('/api/credits', creditsRoutes);
+app.use('/api', creditsTestRouter); // Rutas de prueba sin autenticación
+app.use('/api', customersTestRouter); // Rutas de prueba sin autenticación
 app.use('/api/sales', saleRoutes);
 app.use('/api/service-orders', serviceOrderRoutes);
 app.use('/api/inventory', inventoryRoutes);
