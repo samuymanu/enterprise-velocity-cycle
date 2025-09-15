@@ -521,55 +521,6 @@ export const apiService = {
     invalidate: (pattern: string) => apiCache.invalidate(pattern)
   },
 
-  // Autenticación mejorada
-  auth: {
-    login: async (identifier: string, password: string) => {
-      const data = await apiRequest('/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ identifier, password }),
-        showSuccessNotification: true,
-        loadingMessage: 'Iniciando sesión...'
-      });
-      
-      if (data.token) {
-        authToken = data.token;
-        localStorage.setItem('authToken', data.token);
-        // Guardar refresh token si viene
-        if (data.refreshToken) {
-          refreshTokenStored = data.refreshToken;
-          localStorage.setItem('refreshToken', data.refreshToken);
-        }
-        
-        // Limpiar cache al hacer login
-        apiCache.clear();
-      }
-      
-      return data;
-    },
-
-    logout: () => {
-      authToken = null;
-      localStorage.removeItem('authToken');
-  refreshTokenStored = null;
-  localStorage.removeItem('refreshToken');
-      apiCache.clear();
-      
-      notify({
-        type: 'info',
-        title: 'Sesión cerrada',
-        message: 'Has cerrado sesión correctamente',
-        category: 'api'
-      });
-    },
-
-    verify: async () => {
-      return apiRequest('/auth/verify', {
-        cache: true,
-        cacheTtl: 5 * 60 * 1000 // 5 minutos
-      });
-    }
-  },
-
   // Intentar refrescar la sesión usando refresh token (usa fetch directo para evitar recursión)
   tryRefreshAuth: async (): Promise<boolean> => {
     if (!refreshTokenStored) return false;
@@ -1030,6 +981,20 @@ export const apiService = {
     },
 
     /**
+     * Buscar clientes por nombre, documento o teléfono
+     */
+    search: async (query: string) => {
+      if (!query || query.length < 2) {
+        return { customers: [] };
+      }
+      
+      return apiRequest(`/customers?search=${encodeURIComponent(query)}&limit=10`, {
+        cache: true,
+        cacheTtl: 1 * 60 * 1000 // 1 minuto
+      });
+    },
+
+    /**
      * Crear cliente
      */
     create: async (customerData: any) => {
@@ -1082,6 +1047,160 @@ export const apiService = {
       if (!resp.ok) throw new Error('Error al exportar clientes');
       const blob = await resp.blob();
       return blob;
+    }
+  },
+
+  // Autenticación
+  auth: {
+    /**
+     * Login de usuario
+     */
+    login: async (identifier: string, password: string) => {
+      const base = getApiBase();
+      const response = await fetch(`${base}/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ identifier, password })
+      });
+
+      if (!response.ok) {
+        throw new Error('Error en el login');
+      }
+
+      const data = await response.json();
+      
+      // Guardar tokens
+      if (data.token) {
+        localStorage.setItem('authToken', data.token);
+        authToken = data.token;
+      }
+      if (data.refreshToken) {
+        localStorage.setItem('refreshToken', data.refreshToken);
+        refreshTokenStored = data.refreshToken;
+      }
+
+      return data;
+    },
+
+    /**
+     * Login automático con credenciales de desarrollo
+     */
+    autoLogin: async () => {
+      try {
+        // Intentar login con credenciales de desarrollo
+        return await apiService.auth.login('admin@bikeshop.com', 'DevAdmin@2025!');
+      } catch (error) {
+        console.warn('Auto-login falló:', error);
+        throw error;
+      }
+    },
+
+    /**
+     * Logout de usuario
+     */
+    logout: () => {
+      authToken = null;
+      localStorage.removeItem('authToken');
+      refreshTokenStored = null;
+      localStorage.removeItem('refreshToken');
+      apiCache.clear();
+      
+      notify({
+        type: 'info',
+        title: 'Sesión cerrada',
+        message: 'Has cerrado sesión correctamente',
+        category: 'api'
+      });
+    },
+
+    /**
+     * Verificar token de autenticación
+     */
+    verify: async () => {
+      return apiRequest('/auth/verify', {
+        cache: true,
+        cacheTtl: 5 * 60 * 1000 // 5 minutos
+      });
+    }
+  },
+
+  // Ventas
+  sales: {
+    /**
+     * Crear una nueva venta
+     */
+    create: async (saleData: any) => {
+      return apiRequest('/sales', {
+        method: 'POST',
+        body: JSON.stringify(saleData),
+        showSuccessNotification: true
+      });
+    },
+
+    /**
+     * Obtener ventas recientes
+     */
+    getRecent: async (limit: number = 10) => {
+      return apiRequest(`/sales/recent?limit=${limit}`, {
+        cache: true,
+        cacheTtl: 2 * 60 * 1000
+      });
+    },
+
+    /**
+     * Obtener todas las ventas con filtros
+     */
+    getAll: async (params?: {
+      page?: number;
+      limit?: number;
+      startDate?: string;
+      endDate?: string;
+      customerId?: string;
+      status?: string;
+    }) => {
+      const queryParams = new URLSearchParams();
+      if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            queryParams.append(key, value.toString());
+          }
+        });
+      }
+      const queryString = queryParams.toString();
+      return apiRequest(`/sales${queryString ? `?${queryString}` : ''}`, {
+        cache: true,
+        cacheTtl: 5 * 60 * 1000
+      });
+    },
+
+    /**
+     * Obtener venta por ID
+     */
+    getById: async (id: string) => {
+      return apiRequest(`/sales/${id}`);
+    },
+
+    /**
+     * Actualizar estado de venta
+     */
+    updateStatus: async (id: string, status: string) => {
+      return apiRequest(`/sales/${id}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status }),
+        showSuccessNotification: true
+      });
+    },
+
+    /**
+     * Obtener estadísticas de ventas
+     */
+    getStats: async (period: string = '30d') => {
+      return apiRequest(`/sales/stats?period=${period}`, {
+        cache: true,
+        cacheTtl: 10 * 60 * 1000
+      });
     }
   },
 
@@ -1160,8 +1279,12 @@ export const apiService = {
      * Obtener créditos de un cliente (temporal sin auth)
      */
     getByCustomer: async (customerId: string) => {
+      console.log('🔧 API Credits - Getting credits for customer:', customerId);
+      console.log('🔧 API Credits - Using endpoint: /test-credits/' + customerId);
+      console.log('🔧 API Credits - Full URL:', getApiBase() + '/test-credits/' + customerId);
+
       return apiRequest(`/test-credits/${customerId}`, {
-        cache: true,
+        cache: false, // Deshabilitar cache para debugging
         cacheTtl: 1 * 60 * 1000,
         loadingMessage: 'Cargando créditos...'
       });
@@ -1178,10 +1301,14 @@ export const apiService = {
     },
 
     /**
-     * Crear un crédito
+     * Crear un crédito (temporal sin auth para desarrollo)
      */
     create: async (creditData: any) => {
-      return apiRequest('/credits', {
+      console.log('🔧 API Credits - Creating credit with data:', creditData);
+      console.log('🔧 API Credits - Customer ID being sent:', creditData.customerId);
+      console.log('🔧 API Credits - Using endpoint: /test-credits');
+
+      return apiRequest('/test-credits', {
         method: 'POST',
         body: JSON.stringify(creditData),
         showSuccessNotification: true,

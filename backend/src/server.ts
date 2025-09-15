@@ -108,6 +108,17 @@ const limiter = rateLimit({
 
 // Middleware global
 // Seguridad avanzada con Helmet y CSP estricta
+// Definir fuentes de conexión explícitas para permitir llamadas Socket.IO (XHR + WS) entre puertos locales.
+const cspConnectSrc = [
+  "'self'",
+  'ws:', 'wss:', // comodines para cualquier host WS en dev
+  // Puertos locales comunes frontend/backend
+  'http://localhost:3002', 'http://127.0.0.1:3002',
+  'http://localhost:3000', 'http://127.0.0.1:3000',
+  'http://localhost:5173', 'http://127.0.0.1:5173',
+  'http://localhost:8080', 'http://localhost:8081', 'http://localhost:8082'
+];
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -115,7 +126,7 @@ app.use(helmet({
       scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", 'data:', 'blob:', 'http://localhost:8080', 'http://localhost:3000', 'http://localhost:5173'],
-      connectSrc: ["'self'", 'ws:', 'wss:'],
+      connectSrc: cspConnectSrc,
       fontSrc: ["'self'", 'data:'],
       objectSrc: ["'none'"],
       frameAncestors: ["'self'"],
@@ -123,7 +134,6 @@ app.use(helmet({
     },
   },
   referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
-  // crossOriginResourcePolicy: { policy: 'cross-origin' }, // Omitido para evitar bloqueos
   hsts: env.NODE_ENV === 'production' ? { maxAge: 63072000, includeSubDomains: true, preload: true } : false,
 }));
 
@@ -245,6 +255,8 @@ io.on('connection', (socket) => {
 
   socket.on('join-inventory', () => {
     socket.join('inventory');
+  // Confirmación al cliente para depuración
+  socket.emit('inventory:joined', { room: 'inventory', socketId: socket.id, ts: new Date().toISOString() });
   });
 
   socket.on('join-sales', () => {

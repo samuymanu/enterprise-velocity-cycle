@@ -12,6 +12,9 @@ import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { CurrencyDisplay } from "@/components/CurrencyDisplay";
+import { useCurrency } from "@/utils/currencyUtils";
+import { useExchangeRates } from "@/hooks/useExchangeRates";
 
 const createCustomerSchema = z.object({
   documentType: z.enum(['CI', 'PASSPORT', 'RIF']).default('CI'),
@@ -34,6 +37,7 @@ type CreateCustomerForm = z.infer<typeof createCustomerSchema>;
 
 export default function Customers() {
   const toast = useToast();
+  const { refreshRates, rates } = useExchangeRates();
   const [customers, setCustomers] = useState<any[]>([]);
   const [dashboardStats, setDashboardStats] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
@@ -50,6 +54,17 @@ export default function Customers() {
   const [abonoModalOpen, setAbonoModalOpen] = useState(false);
   const [selectedApartado, setSelectedApartado] = useState<any | null>(null);
   const [nuevoAbonoModalOpen, setNuevoAbonoModalOpen] = useState(false);
+  const [abonoAmount, setAbonoAmount] = useState('');
+  const [usdEquivalent, setUsdEquivalent] = useState('$0.00');
+  const [isUpdatingRates, setIsUpdatingRates] = useState(false);
+
+  // Limpiar estado del modal de nuevo abono
+  useEffect(() => {
+    if (!nuevoAbonoModalOpen) {
+      setAbonoAmount('');
+      setUsdEquivalent('$0.00');
+    }
+  }, [nuevoAbonoModalOpen]);
 
   const form = useForm<CreateCustomerForm>({
     resolver: zodResolver(createCustomerSchema),
@@ -91,6 +106,37 @@ export default function Customers() {
     fetchDashboardStats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Refrescar tasas BCV cuando se abre el modal de apartados
+  useEffect(() => {
+    if (apartadoModalOpen) {
+      refreshRates();
+    }
+  }, [apartadoModalOpen, refreshRates]);
+
+  // Escuchar cambios en la tasa BCV para actualizar automáticamente el modal de apartados
+  useEffect(() => {
+    if (apartadoModalOpen && selectedCustomer && rates.bcv) {
+      console.log('🔄 Customers - Tasa BCV cambió a:', rates.bcv, '- recargando datos del apartado');
+      setIsUpdatingRates(true);
+      // Recargar datos del apartado cuando cambia la tasa
+      const reloadApartadoData = async () => {
+        try {
+          const resp = await apiService.credits.getByCustomer(selectedCustomer.id);
+          const credits = resp.layaways || resp.data || resp || [];
+          if (Array.isArray(credits)) {
+            setApartadoData(credits);
+            console.log('✅ Customers - Datos del apartado recargados por cambio de tasa BCV:', rates.bcv);
+          }
+        } catch (error) {
+          console.error('❌ Customers - Error recargando datos por cambio de tasa:', error);
+        } finally {
+          setIsUpdatingRates(false);
+        }
+      };
+      reloadApartadoData();
+    }
+  }, [rates.bcv, apartadoModalOpen, selectedCustomer]); // Se ejecuta cuando cambia la tasa BCV
 
   const fetchDashboardStats = async () => {
     try {
@@ -578,14 +624,50 @@ export default function Customers() {
                           title="Apartado"
                           onClick={async () => {
                             setSelectedCustomer(customer);
+                            console.log('🔍 Customers - Consultando apartados para cliente:', {
+                              id: customer.id,
+                              name: `${customer.firstName} ${customer.lastName}`,
+                              document: customer.documentNumber,
+                              customerIdToQuery: customer.id
+                            });
                             try {
+                              console.log('🌐 Customers - Iniciando consulta de apartados...');
                               const resp = await apiService.credits.getByCustomer(customer.id);
-                              console.log('Respuesta de credits:', resp); // Para debugging
+                              console.log('📥 Customers - Respuesta completa de credits:', resp);
+                              console.log('📥 Customers - Tipo de respuesta:', typeof resp);
+                              console.log('📥 Customers - Keys de respuesta:', Object.keys(resp || {}));
+
                               const credits = resp.layaways || resp.data || resp || [];
-                              setApartadoData(Array.isArray(credits) ? credits : []);
+                              console.log('📋 Customers - Estructura de respuesta:', {
+                                resp,
+                                layaways: resp.layaways,
+                                data: resp.data,
+                                success: resp.success,
+                                credits
+                              });
+                              console.log('📊 Customers - Número de apartados:', Array.isArray(credits) ? credits.length : 0);
+                              console.log('🔗 Customers - Customer ID usado en consulta:', customer.id);
+
+                              // Verificar si credits es un array válido
+                              if (Array.isArray(credits)) {
+                                console.log('✅ Customers - Credits es un array válido con', credits.length, 'elementos');
+                                console.log('📋 Customers - Primer elemento:', credits[0]);
+                                setApartadoData(credits);
+                              } else {
+                                console.log('❌ Customers - Credits no es un array:', credits);
+                                setApartadoData([]);
+                              }
+
                               setApartadoModalOpen(true);
+                              console.log('🔍 Customers - Modal de apartados abierto');
+                              // Usar el estado actualizado para el log
+                              setTimeout(() => {
+                                console.log('🔍 Customers - Datos finales del modal:', apartadoData);
+                              }, 100);
                             } catch (e: any) {
-                              console.error('Error al obtener créditos:', e); // Para debugging
+                              console.error('❌ Customers - Error al obtener créditos:', e);
+                              console.error('❌ Customers - Detalles del error:', e.response?.data || e.message);
+                              console.error('🔗 Customers - Customer ID que causó error:', customer.id);
                               toast.toast({ title: 'Error', description: e?.message || 'No se pudieron cargar los apartados' });
                               // Mostrar modal vacío para que el usuario sepa que no hay apartados
                               setApartadoData([]);
@@ -744,107 +826,385 @@ export default function Customers() {
           </DialogContent>
         </Dialog>
 
-        {/* Modal de Apartados */}
+        {/* Modal de Apartados Mejorado */}
         <Dialog open={apartadoModalOpen} onOpenChange={setApartadoModalOpen}>
-          <DialogContent className="max-w-4xl p-0">
-            <DialogHeader className="border-b border-card-border px-6 pt-6 pb-2">
-              <DialogTitle className="text-xl font-bold flex items-center gap-2">
-                <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-info/10 text-info text-xl mr-2">
-                  <svg width="28" height="28" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"></path></svg>
-                </span>
-                Apartados de {selectedCustomer?.companyName || `${selectedCustomer?.firstName || ''} ${selectedCustomer?.lastName || ''}`}
+          <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto p-0">
+            <DialogHeader className="border-b border-card-border px-6 pt-6 pb-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20">
+              <DialogTitle className="text-2xl font-bold flex items-center gap-3">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+                  <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <rect x="3" y="7" width="18" height="13" rx="2"/>
+                    <path d="M16 3v4M8 3v4M3 11h18"/>
+                  </svg>
+                </div>
+                <div>
+                  <div className="text-xl">Apartados de {selectedCustomer?.companyName || `${selectedCustomer?.firstName || ''} ${selectedCustomer?.lastName || ''}`}</div>
+                  <div className="text-sm text-muted-foreground mt-1">
+                    {apartadoData.length} apartado{apartadoData.length !== 1 ? 's' : ''} registrado{apartadoData.length !== 1 ? 's' : ''}
+                    <span className="ml-2 text-blue-600 dark:text-blue-400">• Tasa BCV: {rates.bcv} Bs/USD</span>
+                    {isUpdatingRates && (
+                      <span className="ml-2 inline-flex items-center gap-1 text-orange-600 dark:text-orange-400">
+                        <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+                        </svg>
+                        Actualizando...
+                      </span>
+                    )}
+                  </div>
+                </div>
               </DialogTitle>
             </DialogHeader>
-            <div className="px-6 py-4 space-y-6">
+
+            <div className="px-6 py-6">
               {apartadoData.length === 0 ? (
-                <div className="text-center text-foreground-secondary py-8">No hay apartados registrados para este cliente.</div>
+                <div className="text-center py-12">
+                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 dark:bg-gray-800 mb-4">
+                    <svg width="32" height="32" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24" className="text-gray-400">
+                      <rect x="3" y="7" width="18" height="13" rx="2"/>
+                      <path d="M16 3v4M8 3v4M3 11h18"/>
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">No hay apartados registrados</h3>
+                  <p className="text-muted-foreground">Este cliente aún no tiene apartados activos.</p>
+                </div>
               ) : (
                 <div className="space-y-6">
-                  {apartadoData.map((apartado) => (
-                    <div key={apartado.id} className="border rounded-lg p-4 bg-background-secondary shadow-sm">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="font-semibold text-lg">{apartado.sale?.product?.name || 'Producto'}</div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xl font-bold text-info">Bs.S {Intl.NumberFormat('es-VE').format(apartado.amount || apartado.total)}</span>
-                          <Badge variant={apartado.status === 'COMPLETADO' ? 'default' : 'outline'}>
-                            {apartado.status === 'COMPLETADO' ? 'Completado' : 'Activo'}
-                          </Badge>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4 text-sm mb-2">
-                        <div>
-                          <span className="text-foreground-secondary">Fecha apartado:</span> {new Date(apartado.createdAt).toLocaleDateString('es-VE')}
+                  {/* Estadísticas rápidas */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <Card className="p-4 bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                          <span className="text-blue-600 dark:text-blue-400 font-bold">{apartadoData.length}</span>
                         </div>
                         <div>
-                          <span className="text-foreground-secondary">Fecha límite:</span> {apartado.dueDate ? new Date(apartado.dueDate).toLocaleDateString('es-VE') : 'No especificada'}
+                          <p className="text-sm text-muted-foreground">Total Apartados</p>
+                          <p className="font-semibold text-blue-700 dark:text-blue-300">Activos</p>
                         </div>
                       </div>
-                      <div className="mb-2">
-                        <span className="text-foreground-secondary">Abonos realizados:</span>
-                        {apartado.payments && apartado.payments.length > 0 ? (
-                          <ul className="list-disc ml-6 mt-1">
-                            {apartado.payments.map((abono: any, idx: number) => (
-                              <li key={idx} className="flex items-center gap-2">
-                                <span>{new Date(abono.date).toLocaleDateString('es-VE')}</span>
-                                <span className="text-xs bg-muted px-2 py-0.5 rounded">{abono.method || 'Método'}</span>
-                                <span className="font-medium">Bs.S {Intl.NumberFormat('es-VE').format(abono.amount)}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <span className="ml-2">Sin abonos</span>
-                        )}
+                    </Card>
+
+                    <Card className="p-4 bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
+                          <span className="text-green-600 dark:text-green-400 font-bold">
+                            {apartadoData.filter(a => a.status === 'COMPLETADO').length}
+                          </span>
+                        </div>
+                        <div>
+                          <p className="text-sm text-muted-foreground">Completados</p>
+                          <p className="font-semibold text-green-700 dark:text-green-300">
+                            {Math.round((apartadoData.filter(a => a.status === 'COMPLETADO').length / apartadoData.length) * 100)}%
+                          </p>
+                        </div>
                       </div>
-                      <div className="mb-4">
-                        <span className="text-foreground-secondary">Notas:</span> {apartado.notes || <span className="text-muted">—</span>}
+                    </Card>
+
+                    <Card className="p-6 bg-orange-50 dark:bg-orange-950/20 border-orange-200 dark:border-orange-800">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center flex-shrink-0">
+                          <div className="text-center">
+                            <div className="text-xs font-bold text-blue-600 dark:text-blue-400 leading-tight">
+                              {new Intl.NumberFormat('en-US', {
+                                style: 'currency',
+                                currency: 'USD',
+                                minimumFractionDigits: 2
+                              }).format(apartadoData.reduce((sum, a) => sum + (a.amount || a.total || 0), 0))}
+                            </div>
+                            <div className="text-xs text-orange-500 dark:text-orange-500 leading-tight -mt-1">
+                              ≈ {new Intl.NumberFormat('es-VE', {
+                                style: 'currency',
+                                currency: 'VES',
+                                minimumFractionDigits: 2
+                              }).format(apartadoData.reduce((sum, a) => sum + (a.amount || a.total || 0), 0) * rates.bcv)}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex-1 min-w-0 ml-4">
+                          <p className="text-base font-medium text-muted-foreground mb-1">Monto Total</p>
+                          <p className="text-lg font-bold text-orange-700 dark:text-orange-300">Pendiente de Pago</p>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            {apartadoData.length} apartado{apartadoData.length !== 1 ? 's' : ''} activo{apartadoData.length !== 1 ? 's' : ''}
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setSelectedApartado(apartado);
-                            setAbonoModalOpen(true);
-                          }}
-                        >
-                          Abonar
-                        </Button>
-                        <Button size="sm" variant="outline">
-                          Editar
-                        </Button>
-                        <Button size="sm" variant="outline">
-                          Imprimir
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={async () => {
-                            if (window.confirm('¿Seguro que deseas eliminar este apartado?')) {
-                              try {
-                                await apiService.credits.delete(apartado.id);
-                                toast.toast({ title: 'Eliminado', description: 'Apartado eliminado correctamente' });
-                                // Recargar apartados
-                                const resp = await apiService.credits.getByCustomer(selectedCustomer.id);
-                                const credits = resp.layaways || resp.data || resp || [];
-                                setApartadoData(credits);
-                              } catch (e: any) {
-                                toast.toast({ title: 'Error', description: e?.message || 'No se pudo eliminar el apartado' });
-                              }
-                            }
-                          }}
-                        >
-                          Eliminar
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
+                    </Card>
+                  </div>
+
+                  {/* Lista de apartados */}
+                  <div className="space-y-4">
+                    {apartadoData.map((apartado) => {
+                      const totalAmount = apartado.amount || apartado.total || 0;
+                      const paidAmount = apartado.payments?.reduce((sum: number, p: any) => sum + (p.amount || 0), 0) || 0;
+                      const remainingAmount = totalAmount - paidAmount;
+                      const progressPercentage = totalAmount > 0 ? (paidAmount / totalAmount) * 100 : 0;
+
+                      const isOverdue = apartado.dueDate && new Date(apartado.dueDate) < new Date() && apartado.status !== 'COMPLETADO';
+                      const isCompleted = apartado.status === 'COMPLETADO';
+
+                      return (
+                        <Card key={apartado.id} className={`p-6 transition-all duration-200 hover:shadow-md ${
+                          isOverdue ? 'border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-950/10' :
+                          isCompleted ? 'border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-950/10' :
+                          'border-gray-200 dark:border-gray-700'
+                        }`}>
+                          <div className="flex items-start justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                              <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
+                                isCompleted ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' :
+                                isOverdue ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' :
+                                'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                              }`}>
+                                {isCompleted ? (
+                                  <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                    <path d="M20 6L9 17l-5-5"/>
+                                  </svg>
+                                ) : isOverdue ? (
+                                  <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <path d="M12 8v4M12 16h.01"/>
+                                  </svg>
+                                ) : (
+                                  <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                    <rect x="3" y="7" width="18" height="13" rx="2"/>
+                                    <path d="M16 3v4M8 3v4M3 11h18"/>
+                                  </svg>
+                                )}
+                              </div>
+                              <div>
+                                <h3 className="font-semibold text-lg">Apartado #{apartado.id.slice(-8)}</h3>
+                                <p className="text-sm text-muted-foreground">
+                                  Creado: {new Date(apartado.createdAt).toLocaleDateString('es-VE')}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="text-right">
+                              <CurrencyDisplay amount={totalAmount} className="mb-1" primaryCurrency="USD" />
+                              <Badge variant={
+                                isCompleted ? 'default' :
+                                isOverdue ? 'destructive' :
+                                'outline'
+                              } className="text-xs">
+                                {isCompleted ? 'Completado' :
+                                 isOverdue ? 'Vencido' :
+                                 'Activo'}
+                              </Badge>
+                            </div>
+                          </div>
+
+                          {/* Barra de progreso */}
+                          {!isCompleted && (
+                            <div className="mb-4">
+                              <div className="flex items-center justify-between text-sm mb-2">
+                                <span className="text-muted-foreground">Progreso de pago</span>
+                                <span className="font-medium">{Math.round(progressPercentage)}%</span>
+                              </div>
+                              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                                <div
+                                  className={`h-2 rounded-full transition-all duration-300 ${
+                                    progressPercentage >= 100 ? 'bg-green-500' :
+                                    progressPercentage >= 75 ? 'bg-blue-500' :
+                                    progressPercentage >= 50 ? 'bg-yellow-500' :
+                                    'bg-orange-500'
+                                  }`}
+                                  style={{ width: `${Math.min(progressPercentage, 100)}%` }}
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                            <div className="space-y-5">
+                              <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-6 border border-gray-200 dark:border-gray-700">
+                                <div className="flex justify-between items-start mb-4">
+                                  <span className="text-sm font-medium text-muted-foreground">Monto total:</span>
+                                  <CurrencyDisplay amount={totalAmount} showBoth={true} size="sm" primaryCurrency="USD" className="font-bold" />
+                                </div>
+                                {!isCompleted && (
+                                  <>
+                                    <div className="flex justify-between items-start mb-4">
+                                      <span className="text-sm font-medium text-muted-foreground">Pagado:</span>
+                                      <CurrencyDisplay amount={paidAmount} showBoth={true} size="sm" className="text-green-600 dark:text-green-400 font-bold" primaryCurrency="USD" />
+                                    </div>
+                                    <div className="flex justify-between items-start">
+                                      <span className="text-sm font-medium text-muted-foreground">Restante:</span>
+                                      <CurrencyDisplay amount={remainingAmount} showBoth={true} size="sm" className="text-orange-600 dark:text-orange-400 font-bold" primaryCurrency="USD" />
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="space-y-5">
+                              <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-6 border border-gray-200 dark:border-gray-700">
+                                <div className="flex justify-between items-start mb-4">
+                                  <span className="text-sm font-medium text-muted-foreground">Fecha límite:</span>
+                                  <span className={`text-sm font-semibold ${
+                                    isOverdue ? 'text-red-600 dark:text-red-400' : 'text-foreground'
+                                  }`}>
+                                    {apartado.dueDate ? new Date(apartado.dueDate).toLocaleDateString('es-VE') : 'No especificada'}
+                                  </span>
+                                </div>
+                                <div className="flex justify-between items-start mb-4">
+                                  <span className="text-sm font-medium text-muted-foreground">Venta:</span>
+                                  <span className="text-sm font-semibold">{apartado.sale?.saleNumber || 'N/A'}</span>
+                                </div>
+                                {apartado.payments && apartado.payments.length > 0 && (
+                                  <div className="flex justify-between items-start">
+                                    <span className="text-sm font-medium text-muted-foreground">Abonos:</span>
+                                    <span className="text-sm font-semibold text-green-600 dark:text-green-400">
+                                      {apartado.payments.length} realizado{apartado.payments.length !== 1 ? 's' : ''}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Productos */}
+                          {apartado.sale?.saleItems && apartado.sale.saleItems.length > 0 && (
+                            <div className="mb-6">
+                              <h4 className="font-semibold mb-3 text-base text-foreground">Productos apartados:</h4>
+                              <div className="space-y-3">
+                                {apartado.sale.saleItems.map((item: any, idx: number) => (
+                                  <div key={idx} className="flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4 hover:bg-gray-100 dark:hover:bg-gray-800/70 transition-colors">
+                                    <div className="flex items-center gap-4">
+                                      <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                                        <span className="text-sm font-bold text-blue-600 dark:text-blue-400">
+                                          {item.quantity}
+                                        </span>
+                                      </div>
+                                      <div>
+                                        <span className="font-medium text-foreground">{item.product?.name || 'Producto'}</span>
+                                        <p className="text-xs text-muted-foreground">Cant: {item.quantity}</p>
+                                      </div>
+                                    </div>
+                                    <CurrencyDisplay amount={item.total} showBoth={true} size="md" primaryCurrency="USD" className="font-semibold" />
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Historial de abonos */}
+                          {apartado.payments && apartado.payments.length > 0 && (
+                            <div className="mb-6">
+                              <h4 className="font-semibold mb-3 text-base text-foreground">Últimos abonos:</h4>
+                              <div className="space-y-3 max-h-40 overflow-y-auto">
+                                {apartado.payments.slice(-3).map((abono: any, idx: number) => (
+                                  <div key={idx} className="flex items-center justify-between bg-green-50 dark:bg-green-950/20 rounded-lg p-4 hover:bg-green-100 dark:hover:bg-green-950/30 transition-colors">
+                                    <div className="flex items-center gap-3">
+                                      <div className="w-8 h-8 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
+                                        <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" className="text-green-600 dark:text-green-400">
+                                          <path d="M20 6L9 17l-5-5"/>
+                                        </svg>
+                                      </div>
+                                      <div>
+                                        <span className="text-sm font-medium">{new Date(abono.date).toLocaleDateString('es-VE')}</span>
+                                        <Badge variant="outline" className="text-xs ml-2">{abono.method || 'Método'}</Badge>
+                                      </div>
+                                    </div>
+                                    <CurrencyDisplay amount={abono.amount} showBoth={true} size="md" className="text-green-600 dark:text-green-400 font-semibold" primaryCurrency="USD" />
+                                  </div>
+                                ))}
+                                {apartado.payments.length > 3 && (
+                                  <p className="text-xs text-muted-foreground text-center py-2">
+                                    +{apartado.payments.length - 3} abonos más...
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Notas */}
+                          {apartado.notes && (
+                            <div className="mb-4 p-3 bg-yellow-50 dark:bg-yellow-950/20 rounded-lg border border-yellow-200 dark:border-yellow-800">
+                              <div className="flex items-start gap-2">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" className="text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0">
+                                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                                </svg>
+                                <div>
+                                  <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200 mb-1">Notas del apartado:</p>
+                                  <p className="text-sm text-yellow-700 dark:text-yellow-300">{apartado.notes}</p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Acciones */}
+                          <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700">
+                            <div className="flex items-center gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setSelectedApartado(apartado);
+                                  setAbonoModalOpen(true);
+                                }}
+                                className="flex items-center gap-2"
+                              >
+                                <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path d="M12 5v14M5 12h14"/>
+                                </svg>
+                                Abonar
+                              </Button>
+                              <Button size="sm" variant="outline" className="flex items-center gap-2">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                                </svg>
+                                Editar
+                              </Button>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <Button size="sm" variant="outline" className="flex items-center gap-2">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                  <polyline points="14,2 14,8 20,8"/>
+                                </svg>
+                                Imprimir
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={async () => {
+                                  if (window.confirm('¿Seguro que deseas eliminar este apartado?')) {
+                                    try {
+                                      await apiService.credits.delete(apartado.id);
+                                      toast.toast({ title: 'Eliminado', description: 'Apartado eliminado correctamente' });
+                                      // Recargar apartados
+                                      const resp = await apiService.credits.getByCustomer(selectedCustomer.id);
+                                      const credits = resp.layaways || resp.data || resp || [];
+                                      setApartadoData(credits);
+                                    } catch (e: any) {
+                                      toast.toast({ title: 'Error', description: e?.message || 'No se pudo eliminar el apartado' });
+                                    }
+                                  }
+                                }}
+                                className="flex items-center gap-2"
+                              >
+                                <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                </svg>
+                                Eliminar
+                              </Button>
+                            </div>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
-              <div className="flex justify-end pt-2">
-                <Button variant="outline" onClick={() => setApartadoModalOpen(false)}>Cerrar</Button>
+
+              <div className="flex justify-end pt-6 border-t border-gray-200 dark:border-gray-700">
+                <Button variant="outline" onClick={() => setApartadoModalOpen(false)} className="px-8">
+                  Cerrar
+                </Button>
               </div>
             </div>
-            <DialogFooter />
           </DialogContent>
         </Dialog>
 
@@ -866,7 +1226,9 @@ export default function Customers() {
                     <div className="grid grid-cols-2 gap-4 text-sm">
                       <div>
                         <span className="text-foreground-secondary">Monto total:</span>
-                        <span className="font-bold ml-2">Bs.S {Intl.NumberFormat('es-VE').format(selectedApartado.amount || selectedApartado.total)}</span>
+                        <div className="ml-2">
+                          <CurrencyDisplay amount={selectedApartado.amount || selectedApartado.total} showBoth={true} size="sm" primaryCurrency="USD" />
+                        </div>
                       </div>
                       <div>
                         <span className="text-foreground-secondary">Estado:</span>
@@ -886,7 +1248,7 @@ export default function Customers() {
                             <div className="flex items-center justify-between mb-2">
                               <div className="font-medium">Abono #{idx + 1}</div>
                               <div className="flex items-center gap-2">
-                                <span className="text-lg font-bold text-success">Bs.S {Intl.NumberFormat('es-VE').format(abono.amount)}</span>
+                                <CurrencyDisplay amount={abono.amount} showBoth={true} size="md" className="text-success font-bold" primaryCurrency="USD" />
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -914,7 +1276,7 @@ export default function Customers() {
                                             <p><strong>Cliente:</strong> ${selectedCustomer?.companyName || `${selectedCustomer?.firstName || ''} ${selectedCustomer?.lastName || ''}`}</p>
                                             <p><strong>Fecha del Abono:</strong> ${new Date(abono.date).toLocaleDateString('es-VE')}</p>
                                             <p><strong>Método de Pago:</strong> ${abono.method || 'No especificado'}</p>
-                                            <p><strong>Monto:</strong> <span class="amount">Bs.S ${Intl.NumberFormat('es-VE').format(abono.amount)}</span></p>
+                                            <p><strong>Monto:</strong> <span class="amount">$${Intl.NumberFormat('en-US').format(Number((abono.amount / 45.50).toFixed(2)))} USD<br><small style="color: #6b7280;">Bs.S ${Intl.NumberFormat('es-VE').format(abono.amount)}</small></span></p>
                                             ${abono.notes ? `<p><strong>Notas:</strong> ${abono.notes}</p>` : ''}
                                           </div>
                                           <div style="text-align: center; margin-top: 50px;">
@@ -973,56 +1335,121 @@ export default function Customers() {
           </DialogContent>
         </Dialog>
 
-        {/* Modal de Nuevo Abono */}
+        {/* Modal de Nuevo Abono Mejorado */}
         <Dialog open={nuevoAbonoModalOpen} onOpenChange={setNuevoAbonoModalOpen}>
-          <DialogContent className="max-w-md p-0">
-            <DialogHeader className="border-b border-card-border px-6 pt-6 pb-2">
-              <DialogTitle className="text-xl font-bold flex items-center gap-2">
-                <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-success/10 text-success text-xl mr-2">
-                  ➕
-                </span>
-                Agregar Nuevo Abono
+          <DialogContent className="max-w-lg p-0">
+            <DialogHeader className="border-b border-card-border px-6 pt-6 pb-4 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20">
+              <DialogTitle className="text-xl font-bold flex items-center gap-3">
+                <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400">
+                  <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <path d="M12 5v14M5 12h14"/>
+                  </svg>
+                </div>
+                <div>
+                  <div className="text-lg">Nuevo Abono</div>
+                  <div className="text-sm text-muted-foreground">
+                    Apartado #{selectedApartado?.id?.slice(-8) || 'N/A'}
+                  </div>
+                </div>
               </DialogTitle>
             </DialogHeader>
-            <div className="px-6 py-4 space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Monto del Abono</label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  placeholder="0.00"
-                  id="abono-amount"
+
+            <div className="px-6 py-6 space-y-6">
+              {/* Información del apartado */}
+              <Card className="p-4 bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+                <div className="text-sm text-muted-foreground mb-2">Monto restante del apartado:</div>
+                <CurrencyDisplay
+                  amount={(selectedApartado?.amount || selectedApartado?.total || 0) - (selectedApartado?.payments?.reduce((sum: number, p: any) => sum + (p.amount || 0), 0) || 0)}
+                  className="text-xl font-bold text-blue-600 dark:text-blue-400"
                 />
+              </Card>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-foreground">Monto del Abono (Bs.S)</label>
+                  <div className="relative">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                      id="abono-amount"
+                      value={abonoAmount}
+                      onChange={(e) => setAbonoAmount(e.target.value)}
+                      className="pl-12 text-lg"
+                    />
+                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground font-medium">
+                      Bs.S
+                    </span>
+                  </div>
+                  {/* Conversión automática a USD */}
+                  <div className="mt-2 text-sm text-muted-foreground">
+                    Equivalente en USD: <span className="font-medium text-green-600 dark:text-green-400">{usdEquivalent}</span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-foreground">Método de Pago</label>
+                  <select
+                    className="w-full p-3 border border-input rounded-md bg-background text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    id="abono-method"
+                  >
+                    <option value="EFECTIVO">💵 Efectivo</option>
+                    <option value="TRANSFERENCIA">🏦 Transferencia Bancaria</option>
+                    <option value="PAGO_MOVIL">📱 Pago Móvil</option>
+                    <option value="TARJETA">💳 Tarjeta de Crédito/Débito</option>
+                    <option value="CHEQUE">📄 Cheque</option>
+                    <option value="OTRO">🔄 Otro Método</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-foreground">Notas (opcional)</label>
+                  <Input
+                    placeholder="Agregar notas sobre este abono..."
+                    id="abono-notes"
+                    className="resize-none"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">Método de Pago</label>
-                <select
-                  className="w-full p-2 border border-input rounded-md bg-background"
-                  id="abono-method"
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <Button
+                  variant="outline"
+                  onClick={() => setNuevoAbonoModalOpen(false)}
+                  className="px-6"
                 >
-                  <option value="EFECTIVO">Efectivo</option>
-                  <option value="TRANSFERENCIA">Transferencia</option>
-                  <option value="PAGO_MOVIL">Pago Móvil</option>
-                  <option value="TARJETA">Tarjeta</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">Notas (opcional)</label>
-                <Input
-                  placeholder="Notas del abono"
-                  id="abono-notes"
-                />
-              </div>
-              <div className="flex justify-end gap-2 pt-4">
-                <Button variant="outline" onClick={() => setNuevoAbonoModalOpen(false)}>Cancelar</Button>
+                  Cancelar
+                </Button>
                 <Button
                   onClick={async () => {
-                    const amount = parseFloat((document.getElementById('abono-amount') as HTMLInputElement).value);
+                    const amount = parseFloat(abonoAmount);
                     const paymentMethod = (document.getElementById('abono-method') as HTMLSelectElement).value;
                     const notes = (document.getElementById('abono-notes') as HTMLInputElement).value;
 
                     if (!amount || amount <= 0) {
-                      toast.toast({ title: 'Error', description: 'Ingrese un monto válido' });
+                      toast.toast({
+                        title: 'Monto inválido',
+                        description: 'Por favor ingrese un monto mayor a cero',
+                        variant: 'destructive'
+                      });
+                      // Enfocar el input de monto
+                      const amountInput = document.getElementById('abono-amount') as HTMLInputElement;
+                      amountInput?.focus();
+                      return;
+                    }
+
+                    const remainingAmount = (selectedApartado?.amount || selectedApartado?.total || 0) -
+                      (selectedApartado?.payments?.reduce((sum: number, p: any) => sum + (p.amount || 0), 0) || 0);
+
+                    if (amount > remainingAmount) {
+                      toast.toast({
+                        title: 'Monto excedido',
+                        description: `El monto no puede ser mayor al restante: Bs.S ${Intl.NumberFormat('es-VE').format(remainingAmount)}`,
+                        variant: 'destructive'
+                      });
+                      // Enfocar el input de monto
+                      const amountInput = document.getElementById('abono-amount') as HTMLInputElement;
+                      amountInput?.focus();
                       return;
                     }
 
@@ -1032,21 +1459,40 @@ export default function Customers() {
                         method: paymentMethod,
                         notes: notes || null
                       });
-                      toast.toast({ title: 'Abono Agregado', description: 'El abono se agregó correctamente' });
+
+                      toast.toast({
+                        title: '✅ Abono registrado',
+                        description: `Se agregó un abono de Bs.S ${Intl.NumberFormat('es-VE').format(amount)} correctamente`,
+                      });
+
                       setNuevoAbonoModalOpen(false);
-                      // Recargar abonos
+
+                      // Recargar información del apartado
                       const resp = await apiService.credits.getById(selectedApartado.id);
                       setSelectedApartado(resp.layaway || resp);
+
+                      // Recargar lista de apartados del cliente
+                      const creditsResp = await apiService.credits.getByCustomer(selectedCustomer.id);
+                      const credits = creditsResp.layaways || creditsResp.data || creditsResp || [];
+                      setApartadoData(credits);
+
                     } catch (e: any) {
-                      toast.toast({ title: 'Error', description: e?.message || 'No se pudo agregar el abono' });
+                      toast.toast({
+                        title: 'Error al registrar abono',
+                        description: e?.message || 'No se pudo procesar el abono. Intente nuevamente.',
+                        variant: 'destructive'
+                      });
                     }
                   }}
+                  className="px-6 bg-green-600 hover:bg-green-700 text-white flex items-center gap-2"
                 >
-                  Agregar Abono
+                  <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <path d="M20 6L9 17l-5-5"/>
+                  </svg>
+                  Registrar Abono
                 </Button>
               </div>
             </div>
-            <DialogFooter />
           </DialogContent>
         </Dialog>
 

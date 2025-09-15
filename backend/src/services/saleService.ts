@@ -1,7 +1,41 @@
 import { PrismaClient, PaymentMethod } from '@prisma/client';
 import logger from '../logger';
 
+// Importar io de forma dinámica para evitar circular dependencies
+let io: any = null;
+const loadIo = () => {
+  if (io !== null) return io; // Cambiar a !== null para distinguir de undefined
+  try {
+    // Intentar importar de forma síncrona primero
+    const serverModule = require('../server');
+    io = serverModule.io;
+  } catch (error) {
+    console.warn('No se pudo importar io de server.ts');
+    io = null; // Marcar como null si falla
+  }
+  return io;
+};
+
 const prisma = new PrismaClient();
+
+// Mapeo de métodos de pago del frontend al formato de Prisma
+const PAYMENT_METHOD_MAP: Record<string, PaymentMethod> = {
+  'cash-ves': PaymentMethod.CASH_VES,
+  'cash-usd': PaymentMethod.CASH_USD,
+  'card': PaymentMethod.CARD,
+  'transfer': PaymentMethod.TRANSFER,
+  'mixed': PaymentMethod.MIXED,
+  'apartado': 'APARTADO' as PaymentMethod,
+  'credito': 'CREDITO' as PaymentMethod,
+  // También aceptar los valores en mayúsculas por si acaso
+  'CASH_VES': PaymentMethod.CASH_VES,
+  'CASH_USD': PaymentMethod.CASH_USD,
+  'CARD': PaymentMethod.CARD,
+  'TRANSFER': PaymentMethod.TRANSFER,
+  'MIXED': PaymentMethod.MIXED,
+  'APARTADO': 'APARTADO' as PaymentMethod,
+  'CREDITO': 'CREDITO' as PaymentMethod
+};
 
 export interface CreateSaleParams {
   customerId?: string;
@@ -14,12 +48,26 @@ export interface CreateSaleParams {
   total: number;
   paymentMethod: string;
   notes?: string;
+  // Parámetros adicionales para apartados
+  isApartado?: boolean;
+  apartadoData?: {
+    totalAmount: number;
+    initialPayment: number;
+    dueDate: string;
+    paymentMethod: string;
+  };
 }
 
 export async function createSaleService(params: CreateSaleParams) {
-  const { customerId, userId, items, total, paymentMethod, notes } = params;
+  const { customerId, userId, items, total, paymentMethod, notes, isApartado, apartadoData } = params;
 
-  logger.info('Creating sale', { customerId, userId, itemCount: items.length, total, paymentMethod });
+  logger.info('Creating sale', { customerId, userId, itemCount: items.length, total, paymentMethod, isApartado });
+
+  // Mapear el método de pago al formato de Prisma
+  const mappedPaymentMethod = PAYMENT_METHOD_MAP[paymentMethod];
+  if (!mappedPaymentMethod) {
+    throw new Error(`Método de pago inválido: ${paymentMethod}. Valores válidos: ${Object.keys(PAYMENT_METHOD_MAP).join(', ')}`);
+  }
 
   // Validar que el usuario existe
   const user = await prisma.user.findUnique({
@@ -43,9 +91,11 @@ export async function createSaleService(params: CreateSaleParams) {
       // Crear cliente genérico si no existe
       genericCustomer = await prisma.customer.create({
         data: {
+          documentType: 'CI',
+          documentNumber: 'GENERIC',
           firstName: 'Cliente',
           lastName: 'Genérico',
-          documentNumber: 'GENERIC',
+          customerType: 'INDIVIDUAL',
           phone: '',
           email: 'generic@enterprise.com'
         }
@@ -84,7 +134,7 @@ export async function createSaleService(params: CreateSaleParams) {
         tax,
         discount,
         total,
-        paymentMethod: paymentMethod as PaymentMethod,
+        paymentMethod: mappedPaymentMethod,
         notes
       }
     });
@@ -131,12 +181,34 @@ export async function createSaleService(params: CreateSaleParams) {
       });
 
       // Actualizar stock del producto
+      logger.info(`Updating stock for product ${item.productId}: ${product.stock} - ${item.quantity} = ${product.stock - item.quantity}`);
+      const newStock = product.stock - item.quantity;
+      
       await tx.product.update({
         where: { id: item.productId },
         data: {
-          stock: product.stock - item.quantity
+          stock: newStock
         }
       });
+      
+      logger.info(`Stock updated successfully for product ${item.productId}`);
+
+      // Emitir evento WebSocket para actualización en tiempo real
+    if (loadIo() !== null) {
+        try {
+      io.to('inventory').emit('inventory:stock-updated', {
+            productId: item.productId,
+            productName: product.name,
+            newStock: newStock,
+            reason: `Sale ${saleNumber}`,
+            timestamp: new Date().toISOString()
+          });
+          
+          console.log(`📡 WebSocket: Stock actualizado para ${product.name} (${product.sku}): ${newStock}`);
+        } catch (error) {
+          console.error('Error emitiendo evento WebSocket:', error);
+        }
+      }
     }
 
     return {
@@ -147,7 +219,75 @@ export async function createSaleService(params: CreateSaleParams) {
 
   logger.info('Sale created successfully', { saleId: result.id, saleNumber });
 
-  return result;
+  // Si es un apartado, crear el registro en la tabla Layaway
+  let layawayResult = null;
+  if (isApartado && apartadoData) {
+    logger.info('Creating layaway for sale', { saleId: result.id, apartadoData });
+
+    try {
+      // Mapear el método de pago del apartado
+      const apartadoPaymentMethodMap: Record<string, any> = {
+        'zelle': 'ZELLE',
+        'cash-usd': 'CASH_USD',
+        'cash-ves': 'CASH_VES',
+        'card': 'CARD',
+        'transfer': 'TRANSFER'
+      };
+
+      const mappedApartadoPaymentMethod = apartadoPaymentMethodMap[apartadoData.paymentMethod] || 'CASH_USD';
+
+      layawayResult = await prisma.layaway.create({
+        data: {
+          customerId: finalCustomerId!,
+          saleId: result.id,
+          amount: apartadoData.totalAmount,
+          dueDate: new Date(apartadoData.dueDate),
+          status: 'ACTIVO',
+          notes: `Apartado creado - Inicial: ${apartadoData.initialPayment}, Total: ${apartadoData.totalAmount}`
+        }
+      });
+
+      // Crear el pago inicial del apartado
+      await prisma.layawayPayment.create({
+        data: {
+          layawayId: layawayResult.id,
+          date: new Date(),
+          amount: apartadoData.initialPayment,
+          method: mappedApartadoPaymentMethod,
+          notes: 'Pago inicial del apartado'
+        }
+      });
+
+      logger.info('Layaway created successfully', { layawayId: layawayResult.id });
+    } catch (error) {
+      logger.error('Error creating layaway', error);
+      throw new Error('Error al crear el apartado');
+    }
+  }
+
+  // Emitir evento de venta completada
+  if (loadIo() !== null) {
+    try {
+      io.to('sales').emit('sales:completed', {
+        saleId: result.id,
+        saleNumber: result.saleNumber,
+        total: result.total,
+        items: items,
+        isApartado,
+        layawayId: layawayResult?.id,
+        timestamp: new Date().toISOString()
+      });
+      
+      console.log(`📡 WebSocket: Venta completada ${result.saleNumber}${isApartado ? ' (Apartado)' : ''}`);
+    } catch (error) {
+      console.error('Error emitiendo evento de venta:', error);
+    }
+  }
+
+  return {
+    ...result,
+    layaway: layawayResult
+  };
 }
 
 async function generateSaleNumber(): Promise<string> {

@@ -23,10 +23,13 @@ import { BarcodePreview } from "./BarcodePreview";
 import { ProductSheetPreview } from "./ProductSheetPreview";
 import { Settings, Plus, RefreshCw, FilePenLine, Barcode, Download, FileText, Eye, Trash2, Package, History } from "lucide-react";
 import ProductImage from "@/components/inventory/ProductImage";
+import { useInventorySocket } from "@/hooks/useInventorySocket";
 
 
 
 export default function Inventory() {
+  console.log('🏭 Componente Inventory montado');
+  
   // Hook de notificaciones
   const { addNotification } = useNotifications();
   
@@ -43,11 +46,77 @@ export default function Inventory() {
   const [refreshingProducts, setRefreshingProducts] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
+  // Estado para auto-refresh
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const [lastRefreshTime, setLastRefreshTime] = useState<Date>(new Date());
+  const [isStale, setIsStale] = useState(false);
+  const [userActivityTime, setUserActivityTime] = useState<Date>(new Date());
+  
+  console.log('🔧 Estado inicial:', { autoRefreshEnabled, lastRefreshTime, isStale });
+  
+  // WebSocket para actualizaciones en tiempo real
+  const { isConnected: socketConnected, isConnecting: socketConnecting } = useInventorySocket({
+    onStockUpdate: (productId: string, newStock: number) => {
+      console.log('🔥 Actualización de stock en tiempo real:', { productId, newStock });
+      
+      // Actualizar el producto específico en el estado
+      setProducts(currentProducts => 
+        currentProducts.map(product => 
+          product.id === productId 
+            ? { ...product, stock: newStock, updatedAt: new Date().toISOString() }
+            : product
+        )
+      );
+      
+      // Actualizar timestamp y resetear stale
+      setLastRefreshTime(new Date());
+      setIsStale(false);
+      
+      // Mostrar notificación
+      addNotification({
+        type: 'info',
+        title: 'Stock Actualizado',
+        message: `Stock actualizado en tiempo real`,
+        category: 'inventory'
+      });
+    },
+    onSaleCompleted: (saleData: any) => {
+      console.log('💰 Venta completada, refrescando inventario...', saleData);
+      
+      // Forzar refresh completo cuando se completa una venta
+      const filters: any = { ...dynamicFilters };
+      if (selectedCategory) filters.categoryId = selectedCategory;
+      if (debouncedSearch) filters.search = debouncedSearch;
+      
+      loadProducts(true, filters);
+    }
+  });
+  
   // Estado para modales
   const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
   const [isManageModalOpen, setIsManageModalOpen] = useState(false);
   const [isAttributesModalOpen, setIsAttributesModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false); // Estado para el modal de edición
+  
+  // Detectar actividad del usuario
+  useEffect(() => {
+    const handleUserActivity = () => {
+      setUserActivityTime(new Date());
+    };
+
+    // Eventos que indican actividad del usuario
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart'];
+    
+    events.forEach(event => {
+      window.addEventListener(event, handleUserActivity, { passive: true });
+    });
+
+    return () => {
+      events.forEach(event => {
+        window.removeEventListener(event, handleUserActivity);
+      });
+    };
+  }, []);
   const [editingProduct, setEditingProduct] = useState<any | null>(null); // Estado para el producto en edición
   const [deleteModal, setDeleteModal] = useState<{ open: boolean, product: any | null }>({ open: false, product: null }); // Estado para el modal de confirmación de eliminación
   const [isDeleting, setIsDeleting] = useState(false); // Estado para indicar si se está eliminando
@@ -155,6 +224,10 @@ export default function Inventory() {
       const data = await apiService.products.getAll(finalFilters);
       setProducts(data.products || []);
       setError(null);
+      
+      // Actualizar timestamp de última actualización
+      setLastRefreshTime(new Date());
+      setIsStale(false);
     } catch (error: any) {
       console.error('Error cargando productos:', error);
       
@@ -168,6 +241,10 @@ export default function Inventory() {
             const data = await apiService.products.getAll(filters);
             setProducts(data.products || []);
             setError(null);
+            
+            // Actualizar timestamp de última actualización
+            setLastRefreshTime(new Date());
+            setIsStale(false);
             return;
           } catch (retryError: any) {
             console.error('Error en reintento de carga de productos:', retryError);
@@ -378,16 +455,53 @@ export default function Inventory() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCategory, JSON.stringify(dynamicFilters), debouncedSearch]);
 
-  // Debounce para el input de búsqueda (sin forzar renders ni modificar filtros)
+  // Auto-refresh más agresivo y confiable
   useEffect(() => {
-    if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
-    debounceTimeout.current = setTimeout(() => {
-      setDebouncedSearch(search);
-    }, 400);
+    if (!autoRefreshEnabled) {
+      console.log('🔄 Auto-refresh desactivado');
+      return;
+    }
+
+    console.log('🚀 Iniciando auto-refresh agresivo...');
+
+    // Polling más agresivo cuando WebSocket no está conectado
+    const pollInterval = socketConnected ? 5000 : 2000; // 2 segundos sin WebSocket, 5 con WebSocket
+    console.log(`⏰ Usando intervalo de ${pollInterval}ms (WebSocket: ${socketConnected})`);
+
+    const interval = setInterval(async () => {
+      console.log('⏰ Interval ejecutándose...');
+      try {
+        const now = new Date();
+        const timeSinceLastRefresh = now.getTime() - lastRefreshTime.getTime();
+        
+        console.log(`⏱️ Tiempo desde última actualización: ${Math.round(timeSinceLastRefresh / 1000)}s`);
+        
+        // Forzar refresh cada 5 segundos sin importar actividad del usuario
+        if (timeSinceLastRefresh >= (socketConnected ? 5000 : 2000)) {
+          const intervalText = socketConnected ? '5 segundos (WebSocket activo)' : '2 segundos (sin WebSocket)';
+          console.log(`🔄 Auto-refresh: Forzando actualización cada ${intervalText}...`);
+          
+          const filters: any = { ...dynamicFilters };
+          if (selectedCategory) filters.categoryId = selectedCategory;
+          if (debouncedSearch) filters.search = debouncedSearch;
+          
+          await loadProducts(true, filters);
+          setLastRefreshTime(new Date());
+          setIsStale(false);
+        } else if (timeSinceLastRefresh >= 45000) {
+          // Marcar como stale después de 45 segundos
+          setIsStale(true);
+        }
+      } catch (error) {
+        console.error('❌ Error en auto-refresh agresivo:', error);
+      }
+    }, pollInterval);
+
     return () => {
-      if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
+      console.log('🔄 Deteniendo auto-refresh agresivo');
+      clearInterval(interval);
     };
-  }, [search]);
+  }, [autoRefreshEnabled, selectedCategory, dynamicFilters, debouncedSearch, socketConnected]);
 
   // Función para mapear status del backend al frontend
   const getStatusInfo = (product: any) => {
@@ -482,11 +596,99 @@ export default function Inventory() {
             <p className="text-foreground-secondary">
               Control completo de productos, stock y valorización
             </p>
+            {/* Indicador de datos desactualizados */}
+            {isStale && (
+              <div className="flex items-center gap-2 mt-2">
+                <div className="flex items-center gap-2 px-3 py-1 bg-orange-50 border border-orange-200 rounded-lg">
+                  <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></div>
+                  <span className="text-sm text-orange-700 font-medium">
+                    Datos pueden estar desactualizados
+                  </span>
+                </div>
+              </div>
+            )}
+            {/* Última actualización */}
+            <div className="flex items-center gap-2 mt-2">
+              <div className={`flex items-center gap-2 px-3 py-1 border rounded-lg ${
+                autoRefreshEnabled ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'
+              }`}>
+                <div className={`w-2 h-2 rounded-full ${
+                  autoRefreshEnabled ? 'bg-green-500' : 'bg-gray-400'
+                }`}></div>
+                <span className={`text-sm ${
+                  autoRefreshEnabled ? 'text-green-700' : 'text-gray-600'
+                }`}>
+                  {autoRefreshEnabled ? `Auto-refresh activo (cada ${socketConnected ? '5s con WebSocket' : '2s sin WebSocket'})` : 'Auto-refresh pausado'} • 
+                  Última: {lastRefreshTime.toLocaleTimeString('es-ES', { 
+                    hour: '2-digit', 
+                    minute: '2-digit', 
+                    second: '2-digit' 
+                  })}
+                </span>
+              </div>
+              
+              {/* Estado WebSocket */}
+              <div className={`flex items-center gap-2 px-3 py-1 border rounded-lg ${
+                socketConnected ? 'bg-blue-50 border-blue-200' : socketConnecting ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200'
+              }`}>
+                <div className={`w-2 h-2 rounded-full ${
+                  socketConnected ? 'bg-blue-500 animate-pulse' : socketConnecting ? 'bg-yellow-500 animate-spin' : 'bg-red-500'
+                }`}></div>
+                <span className={`text-sm ${
+                  socketConnected ? 'text-blue-700' : socketConnecting ? 'text-yellow-700' : 'text-red-700'
+                }`}>
+                  {socketConnected ? 'Tiempo real activo' : socketConnecting ? 'Conectando...' : 'Sin conexión'}
+                </span>
+              </div>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <Badge variant="outline" className="text-warning border-warning">
               ⚠️ {products.filter(p => p.stock <= p.minStock).length} productos bajo mínimo
             </Badge>
+            {/* Toggle Auto-refresh */}
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-muted-foreground">Auto-refresh:</label>
+              <button
+                onClick={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  autoRefreshEnabled ? 'bg-primary' : 'bg-gray-200'
+                }`}
+                title={autoRefreshEnabled ? 'Desactivar auto-refresh' : 'Activar auto-refresh'}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    autoRefreshEnabled ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+              {autoRefreshEnabled && (
+                <span className="text-xs text-muted-foreground">
+                  {socketConnected ? 'Cada 5s (WebSocket)' : 'Cada 2s (Polling)'}
+                </span>
+              )}
+              {/* Botón de debug */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  console.log('🔍 Estado del auto-refresh:', {
+                    autoRefreshEnabled,
+                    lastRefreshTime,
+                    isStale,
+                    timeSinceLastRefresh: new Date().getTime() - lastRefreshTime.getTime(),
+                    productsCount: products.length,
+                    socketConnected,
+                    socketConnecting
+                  });
+                  alert(`Estado del sistema:\n- Auto-refresh: ${autoRefreshEnabled}\n- WebSocket: ${socketConnected ? 'Conectado' : 'Desconectado'}\n- Última actualización: ${lastRefreshTime.toLocaleTimeString()}\n- Datos desactualizados: ${isStale}\n- Productos: ${products.length}`);
+                }}
+                className="text-xs"
+                title="Ver estado del auto-refresh"
+              >
+                🔍 Debug
+              </Button>
+            </div>
             <Button 
               variant="outline" 
               size="sm" 
@@ -506,14 +708,31 @@ export default function Inventory() {
               Atributos
             </Button>
             <Button 
-              variant="outline" 
+              variant={isStale ? "default" : "outline"} 
               size="sm" 
               onClick={() => loadProducts(true)}
               disabled={refreshingProducts}
-              className="flex items-center gap-2"
+              className={`flex items-center gap-2 ${isStale ? 'bg-orange-500 hover:bg-orange-600 text-white border-orange-500' : ''}`}
             >
               <RefreshCw className={`h-4 w-4 ${refreshingProducts ? 'animate-spin' : ''}`} />
-              Actualizar
+              {refreshingProducts ? 'Actualizando...' : isStale ? 'Actualizar Ahora' : 'Actualizar'}
+            </Button>
+            
+            {/* Botón de actualización forzada */}
+            <Button 
+              variant="ghost"
+              size="sm" 
+              onClick={async () => {
+                console.log('🔄 Forzando actualización manual...');
+                const filters: any = { ...dynamicFilters };
+                if (selectedCategory) filters.categoryId = selectedCategory;
+                if (debouncedSearch) filters.search = debouncedSearch;
+                await loadProducts(true, filters);
+              }}
+              className="flex items-center gap-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"
+              title="Forzar actualización inmediata"
+            >
+              ⚡ Actualizar Ahora
             </Button>
             <Button 
               size="sm" 

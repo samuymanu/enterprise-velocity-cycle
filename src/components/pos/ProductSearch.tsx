@@ -12,6 +12,13 @@ type ProductSuggestion = {
   barcode?: string;
   brand?: { name?: string } | null;
   price?: number;
+  // Marcadores opcionales para sugerencias especiales
+  isBrand?: boolean;          // Sugerencia representa una marca (no un producto directo)
+  brandName?: string;         // Nombre de la marca (redundante para claridad)
+  productCount?: number;      // Cantidad de productos agrupados por esa marca
+  isCategory?: boolean;       // Sugerencia representa una categoría
+  categoryName?: string;      // Nombre legible de la categoría
+  categoryId?: string;        // ID de la categoría (si se identifica)
 };
 
 export function ProductSearch({ onProductSelect }: { onProductSelect?: (product: ProductSuggestion) => void }) {
@@ -62,6 +69,11 @@ export function ProductSearch({ onProductSelect }: { onProductSelect?: (product:
   // Listener global para detectar scanners que no enfocan el input
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Si hay un Dialog (modal) abierto, no interferir (evita bloquear inputs del modal de pago)
+      try {
+        const anyOpenDialog = document.querySelector('[role="dialog"]');
+        if (anyOpenDialog) return; // dejar que el modal maneje las teclas
+      } catch {}
       // Si el foco está en otro input (por ejemplo el buscador de cliente), ignorar
       try {
         const active = document.activeElement as HTMLElement | null;
@@ -157,10 +169,39 @@ export function ProductSearch({ onProductSelect }: { onProductSelect?: (product:
           // Caso: sugerencia compacta { label, value }
           if (r && (r.label || r.value)) {
             const label = String(r.label || r.value).replace(/\n/g, ' ').trim();
+            const brandMatch = label.match(/^Marca:\s*(.+)$/i);
+            const categoryMatch = label.match(/^Categor[ií]a:\s*(.+)$/i);
             // extraer SKU si viene entre paréntesis al final del label: "Nombre (SKU)"
             let sku: string | undefined = undefined;
             const m = label.match(/\(([^)]+)\)\s*$/);
             if (m) sku = m[1];
+
+            if (brandMatch) {
+              const bName = brandMatch[1].trim();
+              return {
+                id: `brand:${bName.toLowerCase()}`,
+                name: bName,
+                isBrand: true,
+                brandName: bName
+              } as ProductSuggestion;
+            }
+
+            if (categoryMatch) {
+              const cName = categoryMatch[1].trim();
+              // Intentar resolver ID desde allCategories ya cargadas
+              let catId: string | undefined = undefined;
+              try {
+                const found = (allCategories || []).find((c: any) => String(c.name).toLowerCase() === cName.toLowerCase());
+                if (found) catId = found.id;
+              } catch {}
+              return {
+                id: `category:${(catId || cName).toLowerCase()}`,
+                name: cName,
+                isCategory: true,
+                categoryName: cName,
+                categoryId: catId
+              } as ProductSuggestion;
+            }
 
             return {
               id: String(r.value || label),
@@ -183,8 +224,34 @@ export function ProductSearch({ onProductSelect }: { onProductSelect?: (product:
           };
         });
 
-        setSuggestions(normalized);
-        setOpen(normalized.length > 0);
+        // Agrupar por marca si aún no se agregó sugerencia explícita
+        const brandGroups: Record<string, number> = {};
+        normalized.forEach(p => {
+          if (p.isBrand) return; // ya es una sugerencia de marca
+          const b = p.brand?.name?.trim();
+          if (b) brandGroups[b] = (brandGroups[b] || 0) + 1;
+        });
+
+        const existingBrandIds = new Set(normalized.filter(p => p.isBrand).map(p => p.id));
+        const extraBrandSuggestions: ProductSuggestion[] = Object.entries(brandGroups)
+          .filter(([, count]) => count > 1)
+          .filter(([bName]) => {
+            const q = query.trim().toLowerCase();
+            const bn = bName.toLowerCase();
+            return q && (bn.startsWith(q) || bn === q);
+          })
+          .map(([bName, count]) => ({
+            id: `brand:${bName.toLowerCase()}`,
+            name: bName,
+            isBrand: true,
+            brandName: bName,
+            productCount: count
+          }))
+          .filter(b => !existingBrandIds.has(b.id));
+
+        const finalSuggestions = [...extraBrandSuggestions, ...normalized];
+        setSuggestions(finalSuggestions);
+        setOpen(finalSuggestions.length > 0);
       } catch (err) {
         console.error('Error fetching suggestions', err);
       } finally {
@@ -248,7 +315,75 @@ export function ProductSearch({ onProductSelect }: { onProductSelect?: (product:
     }
   };
 
+  const handleBrandSelect = async (brandName: string) => {
+    try {
+      setLoading(true);
+      // Intentar cargar productos usando búsqueda por marca
+      const res: any = await apiService.products.getAll({ search: brandName, limit: 50 });
+      const prods = res && res.products ? res.products : (res || []);
+      // Filtrar a solo los que coinciden exactamente con la marca para reducir ruido
+      const filtered = (prods || []).filter((p: any) => {
+        const bn = p?.brand?.name || p?.brandName || p?.brand_name;
+        return bn && String(bn).toLowerCase() === brandName.toLowerCase();
+      }).map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        sku: p.sku,
+        barcode: p.barcode,
+        brand: p.brand || null,
+        price: (p.salePrice ?? p.price ?? p.sale_price) as number | undefined
+      }));
+      setSuggestions(filtered);
+      setOpen(true);
+    } catch (err) {
+      console.error('Error filtrando por marca', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCategorySelect = async (categoryName: string, categoryId?: string) => {
+    try {
+      setLoading(true);
+      let catId = categoryId;
+      if (!catId) {
+        const found = (allCategories || []).find((c: any) => String(c.name).toLowerCase() === categoryName.toLowerCase());
+        if (found) catId = found.id;
+      }
+      const params: any = { limit: 50 };
+      if (catId) params.categoryId = catId;
+      else params.search = categoryName; // fallback
+      const res: any = await apiService.products.getAll(params);
+      const prods = res && res.products ? res.products : (res || []);
+      const filtered = (prods || []).map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        sku: p.sku,
+        barcode: p.barcode,
+        brand: p.brand || null,
+        price: (p.salePrice ?? p.price ?? p.sale_price) as number | undefined
+      }));
+      setSuggestions(filtered);
+      setOpen(true);
+      // Disparar evento global para sincronizar panel de filtros (categoría seleccionada)
+      if (catId) window.dispatchEvent(new CustomEvent('pos:categoryChanged', { detail: catId }));
+    } catch (err) {
+      console.error('Error filtrando por categoría', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSelect = (p: ProductSuggestion) => {
+    if (p.isBrand && p.brandName) {
+      // No agregar al carrito; mostrar productos de esa marca
+      handleBrandSelect(p.brandName);
+      return;
+    }
+    if (p.isCategory && p.categoryName) {
+      handleCategorySelect(p.categoryName, p.categoryId);
+      return;
+    }
     setQuery('');
     setSuggestions([]);
     setOpen(false);
@@ -525,31 +660,50 @@ export function ProductSearch({ onProductSelect }: { onProductSelect?: (product:
                     Cargando productos...
                   </div>
                 ) : suggestions.length > 0 ? (
-                  suggestions.map((s) => (
-                    <div 
-                      key={s.id} 
-                      className="p-3 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-100 dark:border-gray-700 last:border-b-0 transition-colors group" 
-                      onClick={() => handleSelect(s)}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-gray-900 dark:text-white truncate">{s.name}</div>
-                          {(s.sku || s.barcode || s.brand?.name) && (
-                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                              {s.sku && <span className="inline-block bg-gray-100 dark:bg-gray-600 px-2 py-1 rounded text-xs mr-2">SKU: {s.sku}</span>}
-                              {s.barcode && <span className="inline-block bg-gray-100 dark:bg-gray-600 px-2 py-1 rounded text-xs mr-2">Código: {s.barcode}</span>}
-                              {s.brand?.name && <span className="text-blue-600 dark:text-blue-400">• {s.brand.name}</span>}
+                  suggestions.map((s) => {
+                    const isBrand = !!s.isBrand;
+                    const isCategory = !!s.isCategory;
+                    return (
+                      <div
+                        key={s.id}
+                        className={`p-3 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-100 dark:border-gray-700 last:border-b-0 transition-colors group ${isBrand ? 'bg-yellow-50/40 dark:bg-yellow-900/10' : ''} ${isCategory ? 'bg-violet-50/40 dark:bg-violet-900/10' : ''}`}
+                        onClick={() => handleSelect(s)}
+                        title={isBrand ? 'Ver productos de esta marca' : isCategory ? 'Ver productos de esta categoría' : 'Agregar al carrito'}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-gray-900 dark:text-white truncate">
+                              {isBrand ? `Marca: ${s.name}` : isCategory ? `Categoría: ${s.name}` : s.name}
                             </div>
-                          )}
-                        </div>
-                        <div className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <div className="bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-full w-6 h-6 flex items-center justify-center text-sm font-medium">
-                            +
+                            {isBrand ? (
+                              <div className="text-xs text-amber-700 dark:text-amber-300 mt-1 flex items-center gap-2">
+                                <span>{s.productCount} productos</span>
+                                <span className="inline-block bg-amber-100 dark:bg-amber-800 px-2 py-0.5 rounded text-[10px] tracking-wide">FILTRAR</span>
+                              </div>
+                            ) : isCategory ? (
+                              <div className="text-xs text-violet-700 dark:text-violet-300 mt-1 flex items-center gap-2">
+                                <span>Clic para filtrar</span>
+                                <span className="inline-block bg-violet-100 dark:bg-violet-800 px-2 py-0.5 rounded text-[10px] tracking-wide">CATEGORÍA</span>
+                              </div>
+                            ) : (
+                              (s.sku || s.barcode || s.brand?.name) && (
+                                <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                  {s.sku && <span className="inline-block bg-gray-100 dark:bg-gray-600 px-2 py-1 rounded text-xs mr-2">SKU: {s.sku}</span>}
+                                  {s.barcode && <span className="inline-block bg-gray-100 dark:bg-gray-600 px-2 py-1 rounded text-xs mr-2">Código: {s.barcode}</span>}
+                                  {s.brand?.name && <span className="text-blue-600 dark:text-blue-400">• {s.brand.name}</span>}
+                                </div>
+                              )
+                            )}
+                          </div>
+                          <div className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className={`rounded-full w-6 h-6 flex items-center justify-center text-sm font-medium ${isBrand ? 'bg-amber-200 dark:bg-amber-700 text-amber-900 dark:text-amber-100' : isCategory ? 'bg-violet-200 dark:bg-violet-700 text-violet-900 dark:text-violet-100' : 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'}`}>
+                              {isBrand || isCategory ? '→' : '+'}
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 ) : (
                   <div className="p-4 text-sm text-gray-500 dark:text-gray-400 text-center">
                     No se encontraron productos
