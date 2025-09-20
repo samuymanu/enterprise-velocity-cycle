@@ -29,6 +29,7 @@ import inventoryMovementRoutes from './routes/inventoryMovements';
 import dashboardRoutes from './routes/dashboard';
 import attributeRoutes from './routes/attributes';
 import searchRoutes from './routes/search';
+import barcodesRoutes from './routes/barcodes';
 
 // Importar middleware
 // Asegrate de que el archivo exista en './middleware/errorHandler.ts' o corrige la ruta/nombre si es necesario
@@ -216,6 +217,7 @@ app.use('/api/inventory-movements', inventoryMovementRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/attributes', attributeRoutes);
 app.use('/api/search', searchRoutes);
+app.use('/api/barcodes', barcodesRoutes);
 
 // Ruta de salud
 app.get('/api/health', (req, res) => {

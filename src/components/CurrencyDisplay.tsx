@@ -1,6 +1,6 @@
 // components/CurrencyDisplay.tsx
 import React from 'react';
-import { useCurrency } from '../utils/currencyUtils';
+import { useExchangeRates } from '../hooks/useExchangeRates';
 
 interface CurrencyDisplayProps {
   amount: number; // Monto en USD (precio del inventario) o BS (dependiendo del contexto)
@@ -27,7 +27,7 @@ export const CurrencyDisplay: React.FC<CurrencyDisplayProps> = ({
   className = '',
   size = 'md'
 }) => {
-  const { formatBs, formatUsd, bsToUsd, usdToBs } = useCurrency();
+  const { rates } = useExchangeRates();
 
   // Debug: mostrar valores de entrada
   console.log('CurrencyDisplay - Props:', { amount, primaryCurrency, showBoth });
@@ -39,7 +39,9 @@ export const CurrencyDisplay: React.FC<CurrencyDisplayProps> = ({
   };
 
   if (!showBoth) {
-    const displayValue = primaryCurrency === 'USD' ? formatUsd(amount) : formatBs(amount);
+    const displayValue = primaryCurrency === 'USD'
+      ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(amount)
+      : new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'VES', minimumFractionDigits: 2 }).format(amount);
     console.log('CurrencyDisplay - Display único:', displayValue);
     return (
       <span className={`${sizeClasses[size]} font-semibold ${className}`}>
@@ -50,9 +52,9 @@ export const CurrencyDisplay: React.FC<CurrencyDisplayProps> = ({
 
   // Mostrar moneda principal primero, luego la conversión
   if (primaryCurrency === 'USD') {
-    const usdDisplay = formatUsd(amount);
-    const bsDisplay = formatBs(usdToBs(amount)); // Convertir USD a BS usando la tasa
-    console.log('CurrencyDisplay - USD primary:', { usdDisplay, bsDisplay, usdToBsAmount: usdToBs(amount) });
+    const usdDisplay = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(amount);
+    const bsDisplay = new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'VES', minimumFractionDigits: 2 }).format(amount * rates.bcv);
+    console.log('CurrencyDisplay - USD primary:', { usdDisplay, bsDisplay, usdToBsAmount: amount * rates.bcv });
     return (
       <div className={`flex flex-col items-end ${className} min-w-0`}>
         <span className={`${sizeClasses[size]} font-bold text-primary leading-tight block`}>
@@ -66,9 +68,9 @@ export const CurrencyDisplay: React.FC<CurrencyDisplayProps> = ({
   }
 
   // Mostrar BS primero con conversión a USD (precio original del inventario)
-  const bsDisplay = formatBs(amount);
-  const usdDisplay = formatUsd(bsToUsd(amount)); // Convertir BS a USD usando la tasa
-  console.log('CurrencyDisplay - BS primary:', { bsDisplay, usdDisplay, bsToUsdAmount: bsToUsd(amount) });
+  const bsDisplay = new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'VES', minimumFractionDigits: 2 }).format(amount);
+  const usdDisplay = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(amount / rates.bcv);
+  console.log('CurrencyDisplay - BS primary:', { bsDisplay, usdDisplay, bsToUsdAmount: amount / rates.bcv });
   return (
     <div className={`flex flex-col items-end ${className} min-w-0`}>
       <span className={`${sizeClasses[size]} font-bold text-primary leading-tight block`}>

@@ -4,17 +4,15 @@ import logger from '../logger';
 // Importar io de forma dinámica para evitar circular dependencies
 let io: any = null;
 const loadIo = () => {
-  if (io !== null) return io; // Cambiar a !== null para distinguir de undefined
+  if (io) return io;
   try {
-    // Intentar importar de forma síncrona primero
-    const serverModule = require('../server');
-    io = serverModule.io;
+    io = require('../server').io;
   } catch (error) {
     console.warn('No se pudo importar io de server.ts');
-    io = null; // Marcar como null si falla
   }
   return io;
 };
+loadIo();
 
 const prisma = new PrismaClient();
 
@@ -48,20 +46,12 @@ export interface CreateSaleParams {
   total: number;
   paymentMethod: string;
   notes?: string;
-  // Parámetros adicionales para apartados
-  isApartado?: boolean;
-  apartadoData?: {
-    totalAmount: number;
-    initialPayment: number;
-    dueDate: string;
-    paymentMethod: string;
-  };
 }
 
 export async function createSaleService(params: CreateSaleParams) {
-  const { customerId, userId, items, total, paymentMethod, notes, isApartado, apartadoData } = params;
+  const { customerId, userId, items, total, paymentMethod, notes } = params;
 
-  logger.info('Creating sale', { customerId, userId, itemCount: items.length, total, paymentMethod, isApartado });
+  logger.info('Creating sale', { customerId, userId, itemCount: items.length, total, paymentMethod });
 
   // Mapear el método de pago al formato de Prisma
   const mappedPaymentMethod = PAYMENT_METHOD_MAP[paymentMethod];
@@ -194,7 +184,7 @@ export async function createSaleService(params: CreateSaleParams) {
       logger.info(`Stock updated successfully for product ${item.productId}`);
 
       // Emitir evento WebSocket para actualización en tiempo real
-    if (loadIo() !== null) {
+    if (loadIo()) {
         try {
       io.to('inventory').emit('inventory:stock-updated', {
             productId: item.productId,
@@ -219,75 +209,24 @@ export async function createSaleService(params: CreateSaleParams) {
 
   logger.info('Sale created successfully', { saleId: result.id, saleNumber });
 
-  // Si es un apartado, crear el registro en la tabla Layaway
-  let layawayResult = null;
-  if (isApartado && apartadoData) {
-    logger.info('Creating layaway for sale', { saleId: result.id, apartadoData });
-
-    try {
-      // Mapear el método de pago del apartado
-      const apartadoPaymentMethodMap: Record<string, any> = {
-        'zelle': 'ZELLE',
-        'cash-usd': 'CASH_USD',
-        'cash-ves': 'CASH_VES',
-        'card': 'CARD',
-        'transfer': 'TRANSFER'
-      };
-
-      const mappedApartadoPaymentMethod = apartadoPaymentMethodMap[apartadoData.paymentMethod] || 'CASH_USD';
-
-      layawayResult = await prisma.layaway.create({
-        data: {
-          customerId: finalCustomerId!,
-          saleId: result.id,
-          amount: apartadoData.totalAmount,
-          dueDate: new Date(apartadoData.dueDate),
-          status: 'ACTIVO',
-          notes: `Apartado creado - Inicial: ${apartadoData.initialPayment}, Total: ${apartadoData.totalAmount}`
-        }
-      });
-
-      // Crear el pago inicial del apartado
-      await prisma.layawayPayment.create({
-        data: {
-          layawayId: layawayResult.id,
-          date: new Date(),
-          amount: apartadoData.initialPayment,
-          method: mappedApartadoPaymentMethod,
-          notes: 'Pago inicial del apartado'
-        }
-      });
-
-      logger.info('Layaway created successfully', { layawayId: layawayResult.id });
-    } catch (error) {
-      logger.error('Error creating layaway', error);
-      throw new Error('Error al crear el apartado');
-    }
-  }
-
   // Emitir evento de venta completada
-  if (loadIo() !== null) {
+  if (loadIo()) {
     try {
       io.to('sales').emit('sales:completed', {
         saleId: result.id,
         saleNumber: result.saleNumber,
         total: result.total,
         items: items,
-        isApartado,
-        layawayId: layawayResult?.id,
         timestamp: new Date().toISOString()
       });
       
-      console.log(`📡 WebSocket: Venta completada ${result.saleNumber}${isApartado ? ' (Apartado)' : ''}`);
+      console.log(`📡 WebSocket: Venta completada ${result.saleNumber}`);
     } catch (error) {
       console.error('Error emitiendo evento de venta:', error);
     }
   }
 
-  return {
-    ...result,
-    layaway: layawayResult
-  };
+  return result;
 }
 
 async function generateSaleNumber(): Promise<string> {

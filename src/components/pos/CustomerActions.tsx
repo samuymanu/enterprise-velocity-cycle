@@ -4,6 +4,11 @@ import { User, UserPlus, Search } from "lucide-react";
 import { useState, useEffect } from "react";
 import { apiService } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 
 interface Customer {
   id: string;
@@ -14,6 +19,25 @@ interface Customer {
   phone?: string;
   email?: string;
 }
+
+const createCustomerSchema = z.object({
+  documentType: z.enum(['CI', 'PASSPORT', 'RIF']).default('CI'),
+  documentNumber: z.string().min(1, 'Número de documento es requerido').max(20),
+  firstName: z.string().min(1, 'Nombre es requerido').max(50),
+  lastName: z.string().min(1, 'Apellido es requerido').max(50),
+  companyName: z.string().max(100).optional(),
+  customerType: z.enum(['INDIVIDUAL', 'COMPANY']).default('INDIVIDUAL'),
+  phone: z.string().min(7).max(20).optional(),
+  email: z.string().email('Email inválido').max(100).optional(),
+  address: z.string().max(200).optional(),
+  city: z.string().max(50).optional(),
+  state: z.string().max(50).optional(),
+  country: z.string().max(50).default('Venezuela'),
+  isActive: z.boolean().default(true),
+  notes: z.string().optional()
+});
+
+type CreateCustomerForm = z.infer<typeof createCustomerSchema>;
 
 export function CustomerActions({ 
   selectedCustomer, 
@@ -26,7 +50,29 @@ export function CustomerActions({
   const [suggestions, setSuggestions] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const { toast } = useToast();
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [creatingCustomer, setCreatingCustomer] = useState(false);
+  const toast = useToast();
+
+  const form = useForm<CreateCustomerForm>({
+    resolver: zodResolver(createCustomerSchema),
+    defaultValues: { 
+      documentType: 'CI',
+      documentNumber: '',
+      firstName: '',
+      lastName: '',
+      companyName: '',
+      customerType: 'INDIVIDUAL',
+      phone: '',
+      email: '',
+      address: '',
+      city: '',
+      state: '',
+      country: 'Venezuela',
+      isActive: true,
+      notes: ''
+    }
+  });
 
   // Buscar clientes en tiempo real
   useEffect(() => {
@@ -42,10 +88,14 @@ export function CustomerActions({
     try {
       setLoading(true);
       const response = await apiService.customers.search(searchQuery);
+      // El método search ya devuelve { customers: [...] }
       setSuggestions(response.customers || []);
       setShowSuggestions(true);
     } catch (error) {
       console.error('Error buscando clientes:', error);
+      // Mostrar mensaje de error pero no bloquear la UI
+      setSuggestions([]);
+      setShowSuggestions(false);
     } finally {
       setLoading(false);
     }
@@ -56,6 +106,37 @@ export function CustomerActions({
     setSearchQuery('');
     setSuggestions([]);
     setShowSuggestions(false);
+  };
+
+  const createCustomer = async (data: CreateCustomerForm) => {
+    try {
+      setCreatingCustomer(true);
+      const response = await apiService.customers.create(data);
+      
+      if (response.success && response.customer) {
+        toast.toast({
+          title: 'Cliente creado',
+          description: `${response.customer.firstName} ${response.customer.lastName} ha sido creado exitosamente.`,
+          variant: 'default'
+        });
+        
+        // Seleccionar automáticamente el cliente creado
+        selectCustomer(response.customer);
+        setCreateModalOpen(false);
+        form.reset();
+      } else {
+        throw new Error(response.error || 'Error al crear cliente');
+      }
+    } catch (error: any) {
+      console.error('Error creando cliente:', error);
+      toast.toast({
+        title: 'Error',
+        description: error.message || 'No se pudo crear el cliente. Intente nuevamente.',
+        variant: 'destructive'
+      });
+    } finally {
+      setCreatingCustomer(false);
+    }
   };
 
   const getCustomerDisplayName = (customer: Customer) => {
@@ -96,7 +177,11 @@ export function CustomerActions({
               placeholder="Buscar por nombre, cédula o teléfono..."
               className="text-sm"
             />
-            <Button size="sm" variant="outline">
+            <Button 
+              size="sm" 
+              variant="outline"
+              onClick={() => setCreateModalOpen(true)}
+            >
               <UserPlus className="h-4 w-4" />
             </Button>
           </div>
@@ -131,6 +216,163 @@ export function CustomerActions({
           )}
         </div>
       </div>
+
+      {/* Modal de Crear Cliente */}
+      <Dialog open={createModalOpen} onOpenChange={setCreateModalOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Crear Nuevo Cliente</DialogTitle>
+          </DialogHeader>
+          
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(createCustomer)} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="documentType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Tipo Documento</FormLabel>
+                      <FormControl>
+                        <select {...field} className="w-full p-2 border rounded-md">
+                          <option value="CI">CI</option>
+                          <option value="PASSPORT">Pasaporte</option>
+                          <option value="RIF">RIF</option>
+                        </select>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                
+                <FormField
+                  control={form.control}
+                  name="documentNumber"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Número Documento</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder="12345678" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="firstName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Nombre</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder="Juan" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                
+                <FormField
+                  control={form.control}
+                  name="lastName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Apellido</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder="Pérez" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <FormField
+                control={form.control}
+                name="customerType"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Tipo de Cliente</FormLabel>
+                    <FormControl>
+                      <select {...field} className="w-full p-2 border rounded-md">
+                        <option value="INDIVIDUAL">Individual</option>
+                        <option value="COMPANY">Empresa</option>
+                      </select>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {form.watch('customerType') === 'COMPANY' && (
+                <FormField
+                  control={form.control}
+                  name="companyName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Nombre Empresa</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder="Mi Empresa S.A." />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="phone"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Teléfono</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder="+584121234567" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                
+                <FormField
+                  control={form.control}
+                  name="email"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Email</FormLabel>
+                      <FormControl>
+                        <Input {...field} type="email" placeholder="cliente@email.com" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <DialogFooter>
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  onClick={() => setCreateModalOpen(false)}
+                  disabled={creatingCustomer}
+                >
+                  Cancelar
+                </Button>
+                <Button 
+                  type="submit" 
+                  disabled={creatingCustomer}
+                >
+                  {creatingCustomer ? 'Creando...' : 'Crear Cliente'}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

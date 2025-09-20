@@ -1279,12 +1279,8 @@ export const apiService = {
      * Obtener créditos de un cliente (temporal sin auth)
      */
     getByCustomer: async (customerId: string) => {
-      console.log('🔧 API Credits - Getting credits for customer:', customerId);
-      console.log('🔧 API Credits - Using endpoint: /test-credits/' + customerId);
-      console.log('🔧 API Credits - Full URL:', getApiBase() + '/test-credits/' + customerId);
-
       return apiRequest(`/test-credits/${customerId}`, {
-        cache: false, // Deshabilitar cache para debugging
+        cache: true,
         cacheTtl: 1 * 60 * 1000,
         loadingMessage: 'Cargando créditos...'
       });
@@ -1301,14 +1297,10 @@ export const apiService = {
     },
 
     /**
-     * Crear un crédito (temporal sin auth para desarrollo)
+     * Crear un crédito
      */
     create: async (creditData: any) => {
-      console.log('🔧 API Credits - Creating credit with data:', creditData);
-      console.log('🔧 API Credits - Customer ID being sent:', creditData.customerId);
-      console.log('🔧 API Credits - Using endpoint: /test-credits');
-
-      return apiRequest('/test-credits', {
+      return apiRequest('/credits', {
         method: 'POST',
         body: JSON.stringify(creditData),
         showSuccessNotification: true,
@@ -1351,7 +1343,7 @@ export const apiService = {
      * Agregar abono
      */
     addInstallment: async (creditId: string, installmentData: any) => {
-      return apiRequest(`/credits/${creditId}/installments`, {
+      return apiRequest(`/credits/${creditId}/payments`, {
         method: 'POST',
         body: JSON.stringify(installmentData),
         showSuccessNotification: true,
@@ -1363,7 +1355,7 @@ export const apiService = {
      * Editar abono
      */
     updateInstallment: async (id: string, installmentData: any) => {
-      return apiRequest(`/credits/installments/${id}`, {
+      return apiRequest(`/credits/payments/${id}`, {
         method: 'PUT',
         body: JSON.stringify(installmentData),
         showSuccessNotification: true
@@ -1374,7 +1366,7 @@ export const apiService = {
      * Eliminar abono
      */
     deleteInstallment: async (id: string) => {
-      return apiRequest(`/credits/installments/${id}`, {
+      return apiRequest(`/credits/payments/${id}`, {
         method: 'DELETE',
         showSuccessNotification: true
       });

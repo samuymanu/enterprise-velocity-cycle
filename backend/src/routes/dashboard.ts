@@ -9,6 +9,11 @@ const prisma = new PrismaClient();
 // Dashboard principal con métricas
 router.get('/stats', async (req: any, res: any) => {
   try {
+    const now = new Date();
+    const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+
     // Obtener estadísticas principales
     const [
       totalProducts,
@@ -18,7 +23,17 @@ router.get('/stats', async (req: any, res: any) => {
       lowStockProducts,
       recentSales,
       activeServiceOrders,
-      monthlyRevenue
+      monthlyRevenue,
+      lastMonthRevenue,
+      totalApartados,
+      apartadosPendientes,
+      apartadosVencidos,
+      totalCreditos,
+      creditosPendientes,
+      creditosVencidos,
+      lastMonthCustomers,
+      lastMonthSales,
+      lastMonthApartados
     ] = await Promise.all([
       // Total de productos
       prisma.product.count({
@@ -34,7 +49,7 @@ router.get('/stats', async (req: any, res: any) => {
       prisma.sale.count({
         where: {
           createdAt: {
-            gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+            gte: currentMonth
           }
         }
       }),
@@ -113,12 +128,122 @@ router.get('/stats', async (req: any, res: any) => {
       prisma.sale.aggregate({
         where: {
           createdAt: {
-            gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+            gte: currentMonth
           },
           status: 'COMPLETED'
         },
         _sum: {
           total: true
+        }
+      }),
+
+      // Revenue del mes anterior
+      prisma.sale.aggregate({
+        where: {
+          createdAt: {
+            gte: lastMonth,
+            lte: lastMonthEnd
+          },
+          status: 'COMPLETED'
+        },
+        _sum: {
+          total: true
+        }
+      }),
+
+      // Total de apartados activos
+      prisma.layaway.count({
+        where: {
+          status: {
+            in: ['ACTIVO']
+          }
+        }
+      }),
+
+      // Monto total pendiente de apartados
+      prisma.layaway.aggregate({
+        where: {
+          status: {
+            in: ['ACTIVO']
+          }
+        },
+        _sum: {
+          amount: true
+        }
+      }),
+
+      // Apartados vencidos
+      prisma.layaway.count({
+        where: {
+          AND: [
+            { status: 'ACTIVO' },
+            { dueDate: { lt: new Date() } }
+          ]
+        }
+      }),
+
+      // Total de créditos activos
+      prisma.credit.count({
+        where: {
+          status: {
+            in: ['PENDIENTE']
+          }
+        }
+      }),
+
+      // Monto total pendiente de créditos
+      prisma.credit.aggregate({
+        where: {
+          status: {
+            in: ['PENDIENTE']
+          }
+        },
+        _sum: {
+          amount: true
+        }
+      }),
+
+      // Créditos vencidos
+      prisma.credit.count({
+        where: {
+          AND: [
+            { status: 'PENDIENTE' },
+            { dueDate: { lt: new Date() } }
+          ]
+        }
+      }),
+
+      // Clientes del mes anterior
+      prisma.customer.count({
+        where: {
+          createdAt: {
+            gte: lastMonth,
+            lte: lastMonthEnd
+          },
+          isActive: true
+        }
+      }),
+
+      // Ventas del mes anterior
+      prisma.sale.count({
+        where: {
+          createdAt: {
+            gte: lastMonth,
+            lte: lastMonthEnd
+          }
+        }
+      }),
+
+      // Apartados del mes anterior
+      prisma.layaway.count({
+        where: {
+          createdAt: {
+            gte: lastMonth,
+            lte: lastMonthEnd
+          },
+          status: {
+            in: ['ACTIVO']
+          }
         }
       })
     ]);
@@ -131,6 +256,104 @@ router.get('/stats', async (req: any, res: any) => {
       }
     });
 
+    // Calcular cambios porcentuales
+    const calculateChange = (current: number, previous: number) => {
+      if (previous === 0) return current > 0 ? 100 : 0;
+      return ((current - previous) / previous) * 100;
+    };
+
+    const currentRevenue = Number(monthlyRevenue._sum.total || 0);
+    const previousRevenue = Number(lastMonthRevenue._sum.total || 0);
+    const revenueChange = calculateChange(currentRevenue, previousRevenue);
+
+    const customersChange = calculateChange(totalCustomers, lastMonthCustomers);
+    const salesChange = calculateChange(totalSales, lastMonthSales);
+    const apartadosChange = calculateChange(totalApartados, lastMonthApartados);
+
+    // Calcular estadísticas adicionales
+    const today = new Date();
+    const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    
+    const [
+      todayRevenue,
+      todaySales,
+      activeCustomers,
+      topProduct
+    ] = await Promise.all([
+      // Revenue de hoy
+      prisma.sale.aggregate({
+        where: {
+          createdAt: {
+            gte: startOfToday
+          },
+          status: 'COMPLETED'
+        },
+        _sum: {
+          total: true
+        }
+      }),
+      
+      // Ventas de hoy
+      prisma.sale.count({
+        where: {
+          createdAt: {
+            gte: startOfToday
+          }
+        }
+      }),
+      
+      // Clientes activos (con compras en los últimos 30 días)
+      prisma.customer.count({
+        where: {
+          sales: {
+            some: {
+              createdAt: {
+                gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+              }
+            }
+          }
+        }
+      }),
+      
+      // Producto más vendido del mes
+      prisma.saleItem.groupBy({
+        by: ['productId'],
+        where: {
+          sale: {
+            createdAt: {
+              gte: currentMonth
+            },
+            status: 'COMPLETED'
+          }
+        },
+        _sum: {
+          quantity: true
+        },
+        orderBy: {
+          _sum: {
+            quantity: 'desc'
+          }
+        },
+        take: 1
+      })
+    ]);
+
+    // Obtener detalles del producto más vendido
+    let topProductDetails = null;
+    if (topProduct.length > 0) {
+      const product = await prisma.product.findUnique({
+        where: { id: topProduct[0].productId },
+        select: {
+          name: true,
+          sku: true
+        }
+      });
+      topProductDetails = {
+        ...product,
+        quantity: topProduct[0]._sum.quantity
+      };
+    }
+
     res.json({
       stats: {
         totalProducts,
@@ -139,7 +362,28 @@ router.get('/stats', async (req: any, res: any) => {
         totalServiceOrders,
         lowStockProducts,
         inventoryValue: inventoryValue._sum.costPrice || 0,
-        monthlyRevenue: monthlyRevenue._sum.total || 0
+        monthlyRevenue: currentRevenue,
+        apartados: totalApartados,
+        apartadosPendientes: apartadosPendientes._sum.amount || 0,
+        vencidos: apartadosVencidos,
+        creditCount: totalCreditos,
+        creditosPendientes: creditosPendientes._sum.amount || 0,
+        creditosVencidos: creditosVencidos,
+        // Nuevas métricas
+        todayRevenue: todayRevenue._sum.total || 0,
+        todaySales,
+        activeCustomers,
+        topProduct: topProductDetails,
+        // Cambios porcentuales
+        changes: {
+          revenue: revenueChange,
+          customers: customersChange,
+          sales: salesChange,
+          apartados: apartadosChange,
+          products: 0, // TODO: Calcular basado en productos agregados
+          inventory: 0, // TODO: Calcular basado en valor de inventario
+          services: 0 // TODO: Calcular basado en servicios
+        }
       },
       recentSales: recentSales.map(sale => ({
         id: sale.id,

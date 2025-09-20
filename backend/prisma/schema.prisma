@@ -108,6 +108,7 @@ model User {
   savedSearches         SavedSearch[]
   searchHistory         SearchHistory[]
   searchAnalytics       SearchAnalytics[]
+  createdBarcodes       Barcode[]
 
   @@map("users")
 }
@@ -253,6 +254,7 @@ model Product {
   category          Category?               @relation(fields: [categoryId], references: [id])
   saleItems         SaleItem[]
   serviceOrderItems ServiceOrderItem[]
+  barcodes          Barcode[]
 
   @@index([categoryId])
   @@index([name])
@@ -492,6 +494,50 @@ enum AlertPriority {
   MEDIUM
   HIGH
   CRITICAL
+}
+
+// Modelos para sistema de códigos de barras
+model Barcode {
+  id          String         @id @default(cuid())
+  productId   String
+  code        String         @unique
+  format      BarcodeFormat
+  type        BarcodeType    @default(PRODUCT)
+  isPrimary   Boolean        @default(false)
+  isActive    Boolean        @default(true)
+  metadata    Json?          // Información adicional específica del formato
+  createdBy   String
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  product     Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  creator     User           @relation(fields: [createdBy], references: [id])
+
+  @@index([productId])
+  @@index([code])
+  @@index([format])
+  @@index([type])
+  @@index([isActive])
+  @@index([productId, isPrimary])
+  @@map("barcodes")
+}
+
+enum BarcodeFormat {
+  EAN13
+  UPC_A
+  UPC_E
+  CODE128
+  CODE39
+  QR_CODE
+  DATA_MATRIX
+  PDF417
+}
+
+enum BarcodeType {
+  PRODUCT
+  BATCH
+  SERIAL
+  CUSTOM
 }
 
 // Modelos para funcionalidades avanzadas de búsqueda

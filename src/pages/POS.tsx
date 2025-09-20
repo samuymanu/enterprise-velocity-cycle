@@ -15,6 +15,7 @@ import { CustomerActions } from "@/components/pos/CustomerActions";
 import { SaleActions } from "@/components/pos/SaleActions";
 import { RecentSales } from "@/components/pos/RecentSales";
 import { useToast } from '@/hooks/use-toast';
+import { StockValidationTester } from "@/components/StockValidationTester";
 
 interface Customer {
   id: string;
@@ -34,13 +35,192 @@ export default function POS() {
   const toast = useToast();
   const [filtersCollapsed, setFiltersCollapsed] = React.useState(true);
   // Carrito local simple (por ahora en memoria)
-  const [cart, setCart] = React.useState<{ id: string; name: string; sku?: string; brand?: string; quantity: number; price?: number }[]>([]);
+  const [cart, setCart] = React.useState<{ 
+    id: string; 
+    name: string; 
+    sku?: string; 
+    brand?: string; 
+    quantity: number; 
+    price?: number;
+    notes?: string;
+    priority?: 'low' | 'normal' | 'high';
+  }[]>([]);
   const [mixedPaymentModalOpen, setMixedPaymentModalOpen] = React.useState(false);
   const [specialPaymentsModalOpen, setSpecialPaymentsModalOpen] = React.useState(false);
   
   // Estados para cliente y descuento
   const [selectedCustomer, setSelectedCustomer] = React.useState<Customer | null>(null);
   const [discount, setDiscount] = React.useState<Discount | null>(null);
+
+  // Estados para persistencia y recuperación
+  const [pendingSales, setPendingSales] = React.useState<any[]>([]);
+  const [currentSaleId, setCurrentSaleId] = React.useState<string | null>(null);
+
+  // Funciones para persistencia del carrito
+  const saveCartToStorage = React.useCallback((cartData: typeof cart, customer?: Customer | null, discountData?: Discount | null) => {
+    try {
+      const cartState = {
+        items: cartData,
+        customer,
+        discount: discountData,
+        timestamp: Date.now(),
+        saleId: currentSaleId
+      };
+      localStorage.setItem('pos_cart_state', JSON.stringify(cartState));
+      console.log('🛒 Carrito guardado en localStorage');
+    } catch (error) {
+      console.error('Error guardando carrito:', error);
+    }
+  }, [currentSaleId]);
+
+  const loadCartFromStorage = React.useCallback(() => {
+    try {
+      const saved = localStorage.getItem('pos_cart_state');
+      if (saved) {
+        const cartState = JSON.parse(saved);
+        // Verificar si no ha expirado (24 horas)
+        const isExpired = Date.now() - cartState.timestamp > 24 * 60 * 60 * 1000;
+        
+        if (!isExpired && cartState.items?.length > 0) {
+          setCart(cartState.items);
+          if (cartState.customer) setSelectedCustomer(cartState.customer);
+          if (cartState.discount) setDiscount(cartState.discount);
+          if (cartState.saleId) setCurrentSaleId(cartState.saleId);
+          
+          toast.toast({
+            title: 'Carrito recuperado',
+            description: 'Se ha restaurado el carrito anterior',
+            variant: 'default'
+          });
+          
+          console.log('🛒 Carrito cargado desde localStorage');
+          return true;
+        } else {
+          // Limpiar datos expirados
+          localStorage.removeItem('pos_cart_state');
+        }
+      }
+    } catch (error) {
+      console.error('Error cargando carrito:', error);
+    }
+    return false;
+  }, [toast]);
+
+  // Efecto para guardar carrito automáticamente
+  React.useEffect(() => {
+    if (cart.length > 0) {
+      saveCartToStorage(cart, selectedCustomer, discount);
+    }
+  }, [cart, selectedCustomer, discount, saveCartToStorage]);
+
+  // Efecto para cargar carrito al iniciar
+  React.useEffect(() => {
+    loadCartFromStorage();
+  }, [loadCartFromStorage]);
+
+  // Función para validar límites de cantidad por producto
+  const validateQuantityLimit = (productId: string, requestedQuantity: number): boolean => {
+    const inventoryProduct = useInventoryStore.getState().getProductById(productId);
+    if (!inventoryProduct) return true; // Si no hay info de inventario, permitir
+
+    const availableStock = inventoryProduct.stock || 0;
+    const maxAllowed = availableStock; // Usar stock disponible como límite máximo
+
+    if (requestedQuantity > maxAllowed) {
+      toast.toast({
+        title: 'Límite de cantidad excedido',
+        description: `Máximo permitido: ${maxAllowed} unidades de "${inventoryProduct.name}"`,
+        variant: 'destructive'
+      });
+      return false;
+    }
+
+    return true;
+  };
+
+  // Función para recuperar ventas pendientes
+  const loadPendingSales = React.useCallback(async () => {
+    try {
+      // Aquí iría la lógica para cargar ventas pendientes desde el backend
+      // Por ahora, simulamos con datos de ejemplo
+      const pending = [
+        // Ejemplo de ventas pendientes
+      ];
+      setPendingSales(pending);
+    } catch (error) {
+      console.error('Error cargando ventas pendientes:', error);
+    }
+  }, []);
+
+  // Función mejorada para validar stock antes de agregar
+  const validateStockBeforeAdd = async (productId: string, additionalQuantity: number = 1): Promise<boolean> => {
+    try {
+      const inventoryProduct = useInventoryStore.getState().getProductById(productId);
+      if (!inventoryProduct) {
+        // Intentar recargar inventario
+        await useInventoryStore.getState().fetchProducts(true);
+        const reloadedProduct = useInventoryStore.getState().getProductById(productId);
+        if (!reloadedProduct) {
+          toast.toast({
+            title: 'Producto no encontrado',
+            description: 'No se pudo verificar el stock del producto',
+            variant: 'destructive'
+          });
+          return false;
+        }
+      }
+
+      const product = inventoryProduct || useInventoryStore.getState().getProductById(productId);
+      if (!product) return false;
+
+      const availableStock = product.stock || 0;
+      const currentInCart = cart.find(p => p.id === productId)?.quantity || 0;
+      const totalRequested = currentInCart + additionalQuantity;
+
+      // Validar límite de cantidad
+      if (!validateQuantityLimit(productId, totalRequested)) {
+        return false;
+      }
+
+      // Validar stock disponible
+      if (availableStock < totalRequested) {
+        if (availableStock === 0) {
+          toast.toast({
+            title: 'Producto sin stock',
+            description: `El producto "${product.name}" no tiene stock disponible`,
+            variant: 'destructive'
+          });
+          return false;
+        } else {
+          toast.toast({
+            title: 'Stock insuficiente',
+            description: `Solo hay ${availableStock} unidades disponibles. Actualmente tienes ${currentInCart} en el carrito`,
+            variant: 'destructive'
+          });
+          return false;
+        }
+      }
+
+      // Mostrar advertencia si stock está bajo
+      if (availableStock <= (product.minStock || 0) && availableStock > 0) {
+        toast.toast({
+          title: 'Stock bajo',
+          description: `Quedan solo ${availableStock} unidades de "${product.name}"`,
+          variant: 'default'
+        });
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error validando stock:', error);
+      toast.toast({
+        title: 'Error de validación',
+        description: 'No se pudo verificar el stock disponible',
+        variant: 'destructive'
+      });
+      return false;
+    }
+  };
 
   // Inicializar inventory store al cargar el POS
   React.useEffect(() => {
@@ -101,6 +281,12 @@ export default function POS() {
       /^Categor[ií]a:\s*/i.test(product?.name || '')
     ) {
       console.log('Selección detectada como marca o categoría, se ignora para carrito');
+      return;
+    }
+
+    // VALIDACIÓN DE STOCK EN TIEMPO REAL CON LA NUEVA FUNCIÓN
+    const isStockValid = await validateStockBeforeAdd(product.id, 1);
+    if (!isStockValid) {
       return;
     }
 
@@ -216,11 +402,23 @@ export default function POS() {
     setCart(prev => prev.filter(p => p.id !== id));
   };
 
-  const handleQuantityChange = (id: string, newQuantity: number) => {
+  const handleQuantityChange = async (id: string, newQuantity: number) => {
     if (newQuantity <= 0) {
       handleRemove(id);
       return;
     }
+
+    // VALIDAR LÍMITES DE CANTIDAD ANTES DE CAMBIAR
+    if (!validateQuantityLimit(id, newQuantity)) {
+      return;
+    }
+
+    // VALIDACIÓN DE STOCK MEJORADA
+    const isStockValid = await validateStockBeforeAdd(id, newQuantity - (cart.find(p => p.id === id)?.quantity || 0));
+    if (!isStockValid) {
+      return;
+    }
+
     setCart(prev => prev.map(p => p.id === id ? { ...p, quantity: newQuantity } : p));
   };
 
@@ -245,7 +443,72 @@ export default function POS() {
 
   const handleClearCart = () => {
     setCart([]);
+    setSelectedCustomer(null);
     setDiscount(null);
+    setCurrentSaleId(null);
+    // Limpiar del localStorage
+    localStorage.removeItem('pos_cart_state');
+    toast.toast({
+      title: 'Carrito limpiado',
+      description: 'Todos los productos han sido removidos del carrito',
+      variant: 'default'
+    });
+  };
+
+  // Función para confirmar venta exitosa y actualizar estados
+  const confirmSaleSuccess = (saleData: any, paymentData: any) => {
+    // Limpiar carrito y estados
+    setCart([]);
+    setSelectedCustomer(null);
+    setDiscount(null);
+    setCurrentSaleId(null);
+    localStorage.removeItem('pos_cart_state');
+
+    // Notificar éxito con detalles
+    const saleAmount = saleData.total || paymentData.total;
+    toast.toast({
+      title: '✅ Venta Completada',
+      description: `Venta #${saleData.id || 'N/A'} por ${formatCurrency(saleAmount)} procesada exitosamente`,
+      variant: 'default'
+    });
+
+    // Log de la venta completada
+    console.log('🎉 Venta completada:', {
+      saleId: saleData.id,
+      customer: selectedCustomer?.firstName || 'Cliente no especificado',
+      total: saleAmount,
+      items: cart.length,
+      paymentMethod: paymentData.paymentMethod
+    });
+  };
+
+  const handleItemUpdate = (id: string, updates: Partial<{ notes?: string; priority?: 'low' | 'normal' | 'high' }>) => {
+    setCart(prev => prev.map(item => 
+      item.id === id ? { ...item, ...updates } : item
+    ));
+  };
+
+  // Función para recuperar una venta pendiente
+  const recoverPendingSale = (saleData: any) => {
+    try {
+      setCart(saleData.items || []);
+      if (saleData.customer) setSelectedCustomer(saleData.customer);
+      if (saleData.discount) setDiscount(saleData.discount);
+      setCurrentSaleId(saleData.id);
+
+      toast.toast({
+        title: 'Venta recuperada',
+        description: `Venta pendiente #${saleData.id} restaurada`,
+        variant: 'default'
+      });
+    } catch (error) {
+      console.error('Error recuperando venta:', error);
+      toast.toast({
+        title: 'Error',
+        description: 'No se pudo recuperar la venta pendiente',
+        variant: 'destructive'
+      });
+    }
   };
 
   const handlePaymentComplete = async (paymentData: any) => {
@@ -290,7 +553,7 @@ export default function POS() {
       }
 
       // Usar el nuevo endpoint de ventas
-      const saleData: any = {
+      const saleData = {
         customerId: selectedCustomer?.id || paymentData.customerId || undefined,
         items: paymentData.cartItems.map((item: any) => ({
           productId: item.id,
@@ -302,69 +565,38 @@ export default function POS() {
         notes: saleNotes
       };
 
-      // Agregar información del apartado si corresponde
-      if (paymentData.isApartado && paymentData.apartadoData) {
-        saleData.isApartado = true;
-        saleData.apartadoData = {
-          totalAmount: paymentData.apartadoTotal,
-          initialPayment: paymentData.total,
-          dueDate: paymentData.apartadoData.dueDate,
-          paymentMethod: paymentData.apartadoData.paymentMethod
-        };
-      }
-
       console.log('📊 Enviando datos de venta:', saleData);
 
-      const response = await fetch('/api/sales', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-        },
-        body: JSON.stringify(saleData)
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('❌ Error del servidor:', errorData);
-        throw new Error(errorData.error || 'Error al procesar el pago');
-      }
-
-      const result = await response.json();
+      // Usar apiService en lugar de fetch directo para mejor consistencia
+      const result = await apiService.sales.create(saleData);
       console.log('✅ Venta procesada:', result);
 
-      // Notificar éxito
-      if (paymentData.isApartado) {
-        toast.toast({
-          title: 'Apartado Registrado',
-          description: `Apartado creado. Inicial pagado: ${formatCurrency(paymentData.total)}`,
-          variant: 'default'
-        });
-      } else if (paymentData.paymentMethod === 'credito') {
-        toast.toast({
-          title: 'Crédito Registrado',
-          description: `Crédito procesado por ${formatCurrency(paymentData.total)}`,
-          variant: 'default'
-        });
-      } else {
-        toast.toast({
-          title: 'Pago procesado',
-          description: `Venta completada por ${formatCurrency(saleTotal)}`,
-          variant: 'default'
-        });
+      // Confirmar venta exitosa y actualizar estados
+      confirmSaleSuccess(result.sale || result, paymentData);
+
+    } catch (error: any) {
+      console.error('❌ Error procesando venta:', error);
+      
+      // Manejo mejorado de errores
+      let errorMessage = 'Error desconocido al procesar la venta';
+      
+      if (error.message?.includes('stock')) {
+        errorMessage = 'Error de stock: Verifica la disponibilidad de productos';
+      } else if (error.message?.includes('payment')) {
+        errorMessage = 'Error de pago: Verifica el método de pago';
+      } else if (error.message?.includes('customer')) {
+        errorMessage = 'Error de cliente: Verifica los datos del cliente';
+      } else if (error.message) {
+        errorMessage = error.message;
       }
 
-      // Limpiar el carrito y estados
-      setCart([]);
-      setSelectedCustomer(null);
-      setDiscount(null);
-    } catch (error: any) {
-      console.error('Error procesando pago:', error);
       toast.toast({
-        title: 'Error',
-        description: error.message || 'Error al procesar el pago',
+        title: '❌ Error en Venta',
+        description: errorMessage,
         variant: 'destructive'
       });
+
+      // No limpiar el carrito en caso de error para permitir reintento
     }
   };
 
@@ -439,6 +671,7 @@ export default function POS() {
               onRemove={handleRemove} 
               onQuantityChange={handleQuantityChange}
               onClearCart={handleClearCart}
+              onItemUpdate={handleItemUpdate}
             />
           </div>
 
@@ -536,6 +769,11 @@ export default function POS() {
         cartItems={cart}
         onPaymentComplete={handlePaymentComplete}
       />
+
+      {/* Componente de prueba temporal para validar funcionalidad de stock */}
+      <div className="mt-8">
+        <StockValidationTester />
+      </div>
     </AppLayout>
   );
 }

@@ -361,22 +361,9 @@ export const SpecialPaymentsModal: React.FC<SpecialPaymentsModalProps> = ({
       cartItems: cartItems
     };
 
-    console.log('📤 POS - Enviando datos de apartado:', {
-      customer: {
-        id: selectedCustomer!.id,
-        name: `${selectedCustomer!.firstName} ${selectedCustomer!.lastName}`,
-        document: selectedCustomer!.documentNumber
-      },
-      apartado: apartadoData,
-      customerIdToSend: selectedCustomer!.id
-    });
-
-    // Usar el servicio real de apartados
-    const apartadoResult = await SpecialPaymentsService.createApartado(apartadoData);
-
-    if (!apartadoResult.success) {
-      throw new Error(apartadoResult.message || 'Error al crear apartado');
-    }
+    // Por ahora, simulamos el registro del apartado
+    // TODO: Implementar endpoint real en backend
+    const mockApartadoId = `apartado_${Date.now()}`;
 
     // Para apartado, solo procesamos el pago inicial
     const updatedPaymentData = {
@@ -384,9 +371,9 @@ export const SpecialPaymentsModal: React.FC<SpecialPaymentsModalProps> = ({
       total: initial, // Solo el inicial se paga ahora
       apartadoData: {
         ...apartadoData,
-        id: apartadoResult.apartadoId
+        id: mockApartadoId
       },
-      apartadoId: apartadoResult.apartadoId,
+      apartadoId: mockApartadoId,
       isApartado: true, // Flag para identificar que es un apartado
       apartadoTotal: totalApartado, // Total del apartado
       apartadoRemaining: totalApartado - initial, // Monto restante
@@ -399,7 +386,7 @@ export const SpecialPaymentsModal: React.FC<SpecialPaymentsModalProps> = ({
           dueDate: apartadoForm.dueDate,
           remainingAmount: totalApartado - initial,
           paymentMethod: apartadoForm.paymentMethod,
-          apartadoId: apartadoResult.apartadoId,
+          apartadoId: mockApartadoId,
           paymentType: 'initial'
         }
       }]

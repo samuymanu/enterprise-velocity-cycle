@@ -55,16 +55,32 @@ export default function Customers() {
   const [selectedApartado, setSelectedApartado] = useState<any | null>(null);
   const [nuevoAbonoModalOpen, setNuevoAbonoModalOpen] = useState(false);
   const [abonoAmount, setAbonoAmount] = useState('');
-  const [usdEquivalent, setUsdEquivalent] = useState('$0.00');
+  const [usdEquivalent, setUsdEquivalent] = useState('Bs.S 0,00');
+  const [abonoMethod, setAbonoMethod] = useState('EFECTIVO');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [isUpdatingRates, setIsUpdatingRates] = useState(false);
 
   // Limpiar estado del modal de nuevo abono
   useEffect(() => {
     if (!nuevoAbonoModalOpen) {
       setAbonoAmount('');
-      setUsdEquivalent('$0.00');
+      setUsdEquivalent('Bs.S 0,00');
+      setAbonoMethod('EFECTIVO');
     }
   }, [nuevoAbonoModalOpen]);
+
+  // Actualizar equivalente en Bs.S cuando cambia el monto del abono
+  useEffect(() => {
+    if (abonoAmount && rates.bcv) {
+      const amount = parseFloat(abonoAmount);
+      if (!isNaN(amount) && amount > 0) {
+        const vesEquivalent = amount * rates.bcv;
+        setUsdEquivalent(`Bs.S ${Intl.NumberFormat('es-VE').format(vesEquivalent)}`);
+      } else {
+        setUsdEquivalent('Bs.S 0,00');
+      }
+    }
+  }, [abonoAmount, rates.bcv]);
 
   const form = useForm<CreateCustomerForm>({
     resolver: zodResolver(createCustomerSchema),
@@ -144,14 +160,18 @@ export default function Customers() {
       // backend returns { stats: { ... }, recentSales, activeServiceOrders }
       if (resp && resp.stats) {
         setDashboardStats(resp.stats);
+        console.log('📊 Estadísticas del dashboard actualizadas:', resp.stats);
       } else if (resp && resp.totalCustomers !== undefined) {
         // compatibility fallback
         setDashboardStats(resp);
+        console.log('📊 Estadísticas del dashboard (fallback):', resp);
       } else {
         setDashboardStats(null);
+        console.log('📊 No se pudieron cargar estadísticas del dashboard');
       }
     } catch (err: any) {
       // no toast here to avoid spamming on page load
+      console.error('❌ Error cargando estadísticas del dashboard:', err);
       setDashboardStats(null);
     }
   };
@@ -350,17 +370,61 @@ export default function Customers() {
           <Card className="enterprise-card p-6 text-center">
             <p className="text-3xl font-bold text-warning">{dashboardStats ? (dashboardStats.creditCount !== undefined ? Intl.NumberFormat('es-VE').format(dashboardStats.creditCount) : '—') : '—'}</p>
             <p className="text-sm text-foreground-secondary">Créditos</p>
+            {dashboardStats && dashboardStats.creditosPendientes > 0 && (
+              <p className="text-xs text-muted-foreground mt-1">
+                ${Intl.NumberFormat('en-US').format(dashboardStats.creditosPendientes)} pendiente
+              </p>
+            )}
           </Card>
 
           <Card className="enterprise-card p-6 text-center">
             <p className="text-3xl font-bold text-success">{dashboardStats && dashboardStats.apartados !== undefined ? Intl.NumberFormat('es-VE').format(dashboardStats.apartados) : '—'}</p>
             <p className="text-sm text-foreground-secondary">Apartados</p>
+            {dashboardStats && dashboardStats.apartadosPendientes > 0 && (
+              <p className="text-xs text-muted-foreground mt-1">
+                ${Intl.NumberFormat('en-US').format(dashboardStats.apartadosPendientes)} pendiente
+              </p>
+            )}
           </Card>
 
           <Card className="enterprise-card p-6 text-center">
-            <p className="text-3xl font-bold text-info">{dashboardStats && dashboardStats.vencidos !== undefined ? Intl.NumberFormat('es-VE', { style: 'currency', currency: 'VES' }).format(dashboardStats.vencidos) : '—'}</p>
+            <p className="text-3xl font-bold text-info">
+              {dashboardStats ? (
+                (dashboardStats.vencidos || 0) + (dashboardStats.creditosVencidos || 0) > 0 ?
+                Intl.NumberFormat('es-VE').format((dashboardStats.vencidos || 0) + (dashboardStats.creditosVencidos || 0)) :
+                '—'
+              ) : '—'}
+            </p>
             <p className="text-sm text-foreground-secondary">Vencidos</p>
+            {(dashboardStats?.vencidos > 0 || dashboardStats?.creditosVencidos > 0) && (
+              <div className="text-xs text-muted-foreground mt-1 space-y-1">
+                {dashboardStats.vencidos > 0 && (
+                  <p>{dashboardStats.vencidos} apartado{dashboardStats.vencidos !== 1 ? 's' : ''}</p>
+                )}
+                {dashboardStats.creditosVencidos > 0 && (
+                  <p>{dashboardStats.creditosVencidos} crédito{dashboardStats.creditosVencidos !== 1 ? 's' : ''}</p>
+                )}
+              </div>
+            )}
           </Card>
+        </div>
+
+        {/* Botón para refrescar estadísticas */}
+        <div className="flex justify-center mt-4">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              console.log('🔄 Refrescando estadísticas del dashboard...');
+              fetchDashboardStats();
+            }}
+            className="flex items-center gap-2"
+          >
+            <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            Actualizar Estadísticas
+          </Button>
         </div>
 
         {/* Search and Filters */}
@@ -935,7 +999,11 @@ export default function Customers() {
                   <div className="space-y-4">
                     {apartadoData.map((apartado) => {
                       const totalAmount = apartado.amount || apartado.total || 0;
-                      const paidAmount = apartado.payments?.reduce((sum: number, p: any) => sum + (p.amount || 0), 0) || 0;
+                      const paymentsArray = Array.isArray(apartado.payments) ? apartado.payments : [];
+                      const paidAmount = paymentsArray.reduce((sum: number, p: any) => {
+                        const paymentAmount = typeof p.amount === 'number' ? p.amount : parseFloat(p.amount) || 0;
+                        return sum + paymentAmount;
+                      }, 0);
                       const remainingAmount = totalAmount - paidAmount;
                       const progressPercentage = totalAmount > 0 ? (paidAmount / totalAmount) * 100 : 0;
 
@@ -1149,6 +1217,40 @@ export default function Customers() {
                                 </svg>
                                 Abonar
                               </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={async () => {
+                                  try {
+                                    console.log('🔄 Refrescando datos del apartado:', apartado.id);
+                                    const resp = await apiService.credits.getById(apartado.id);
+                                    const updatedApartado = resp.layaway || resp;
+
+                                    // Actualizar el apartado específico en apartadoData
+                                    setApartadoData(prevData =>
+                                      prevData.map(a => a.id === apartado.id ? updatedApartado : a)
+                                    );
+
+                                    toast.toast({
+                                      title: 'Datos actualizados',
+                                      description: 'Los datos del apartado han sido refrescados',
+                                    });
+                                  } catch (error) {
+                                    console.error('❌ Error al refrescar:', error);
+                                    toast.toast({
+                                      title: 'Error',
+                                      description: 'No se pudieron refrescar los datos',
+                                      variant: 'destructive'
+                                    });
+                                  }
+                                }}
+                                className="flex items-center gap-2"
+                              >
+                                <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                                </svg>
+                                Refrescar
+                              </Button>
                               <Button size="sm" variant="outline" className="flex items-center gap-2">
                                 <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                                   <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
@@ -1359,14 +1461,22 @@ export default function Customers() {
               <Card className="p-4 bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
                 <div className="text-sm text-muted-foreground mb-2">Monto restante del apartado:</div>
                 <CurrencyDisplay
-                  amount={(selectedApartado?.amount || selectedApartado?.total || 0) - (selectedApartado?.payments?.reduce((sum: number, p: any) => sum + (p.amount || 0), 0) || 0)}
+                  amount={(() => {
+                    const apartadoTotal = selectedApartado?.amount || selectedApartado?.total || 0;
+                    const paymentsArray = Array.isArray(selectedApartado?.payments) ? selectedApartado.payments : [];
+                    const totalPagado = paymentsArray.reduce((sum: number, p: any) => {
+                      const paymentAmount = typeof p.amount === 'number' ? p.amount : parseFloat(p.amount) || 0;
+                      return sum + paymentAmount;
+                    }, 0);
+                    return apartadoTotal - totalPagado;
+                  })()}
                   className="text-xl font-bold text-blue-600 dark:text-blue-400"
                 />
               </Card>
 
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium mb-2 text-foreground">Monto del Abono (Bs.S)</label>
+                  <label className="block text-sm font-medium mb-2 text-foreground">Monto del Abono ($)</label>
                   <div className="relative">
                     <Input
                       type="number"
@@ -1378,12 +1488,12 @@ export default function Customers() {
                       className="pl-12 text-lg"
                     />
                     <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground font-medium">
-                      Bs.S
+                      $
                     </span>
                   </div>
-                  {/* Conversión automática a USD */}
+                  {/* Conversión automática a Bs.S */}
                   <div className="mt-2 text-sm text-muted-foreground">
-                    Equivalente en USD: <span className="font-medium text-green-600 dark:text-green-400">{usdEquivalent}</span>
+                    Equivalente en Bs.S: <span className="font-medium text-green-600 dark:text-green-400">{usdEquivalent}</span>
                   </div>
                 </div>
 
@@ -1392,6 +1502,8 @@ export default function Customers() {
                   <select
                     className="w-full p-3 border border-input rounded-md bg-background text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent"
                     id="abono-method"
+                    value={abonoMethod}
+                    onChange={(e) => setAbonoMethod(e.target.value)}
                   >
                     <option value="EFECTIVO">💵 Efectivo</option>
                     <option value="TRANSFERENCIA">🏦 Transferencia Bancaria</option>
@@ -1423,8 +1535,16 @@ export default function Customers() {
                 <Button
                   onClick={async () => {
                     const amount = parseFloat(abonoAmount);
-                    const paymentMethod = (document.getElementById('abono-method') as HTMLSelectElement).value;
+                    const paymentMethod = abonoMethod;
                     const notes = (document.getElementById('abono-notes') as HTMLInputElement).value;
+
+                    console.log('🔍 Debug - Intentando registrar abono:', {
+                      amount,
+                      paymentMethod,
+                      notes,
+                      selectedApartado: selectedApartado?.id,
+                      abonoAmount
+                    });
 
                     if (!amount || amount <= 0) {
                       toast.toast({
@@ -1438,13 +1558,52 @@ export default function Customers() {
                       return;
                     }
 
-                    const remainingAmount = (selectedApartado?.amount || selectedApartado?.total || 0) -
-                      (selectedApartado?.payments?.reduce((sum: number, p: any) => sum + (p.amount || 0), 0) || 0);
+                    // Validar método de pago
+                    if (!paymentMethod || paymentMethod.trim() === '') {
+                      console.error('❌ Error - Método de pago vacío:', paymentMethod);
+                      toast.toast({
+                        title: 'Método de pago requerido',
+                        description: 'Por favor seleccione un método de pago válido.',
+                        variant: 'destructive'
+                      });
+                      return;
+                    }
+
+                    // Calcular monto restante de forma más robusta
+                    const apartadoTotal = selectedApartado?.amount || selectedApartado?.total || 0;
+                    const paymentsArray = Array.isArray(selectedApartado?.payments) ? selectedApartado.payments : [];
+                    const totalPagado = paymentsArray.reduce((sum: number, p: any) => {
+                      const paymentAmount = typeof p.amount === 'number' ? p.amount : parseFloat(p.amount) || 0;
+                      return sum + paymentAmount;
+                    }, 0);
+                    const remainingAmount = apartadoTotal - totalPagado;
+
+                    console.log('🔍 Debug - Cálculo del monto restante:', {
+                      apartadoId: selectedApartado?.id,
+                      apartadoTotal,
+                      paymentsCount: paymentsArray.length,
+                      payments: paymentsArray.map(p => ({ id: p.id, amount: p.amount, method: p.method })),
+                      totalPagado,
+                      remainingAmount,
+                      amountToRegister: amount
+                    });
+
+                    // Validación más robusta del monto restante
+                    if (remainingAmount <= 0) {
+                      console.log('⚠️ Debug - Monto restante es cero o negativo:', remainingAmount);
+                      toast.toast({
+                        title: 'Apartado completado',
+                        description: 'Este apartado ya está completamente pagado.',
+                        variant: 'destructive'
+                      });
+                      return;
+                    }
 
                     if (amount > remainingAmount) {
+                      console.log('⚠️ Debug - Monto excede el restante:', { amount, remainingAmount });
                       toast.toast({
                         title: 'Monto excedido',
-                        description: `El monto no puede ser mayor al restante: Bs.S ${Intl.NumberFormat('es-VE').format(remainingAmount)}`,
+                        description: `El monto no puede ser mayor al restante: $ ${Intl.NumberFormat('en-US').format(remainingAmount)}`,
                         variant: 'destructive'
                       });
                       // Enfocar el input de monto
@@ -1454,42 +1613,199 @@ export default function Customers() {
                     }
 
                     try {
-                      await apiService.credits.addInstallment(selectedApartado.id, {
-                        amount,
-                        method: paymentMethod,
-                        notes: notes || null
+                      console.log('🔍 Debug - Enviando datos a API:', {
+                        apartadoId: selectedApartado.id,
+                        data: {
+                          amount,
+                          method: paymentMethod,
+                          notes: notes || null
+                        }
                       });
+
+                      // Verificar estado de autenticación antes de la llamada
+                      const currentToken = localStorage.getItem('authToken');
+                      console.log('🔐 Debug - Estado de autenticación:', {
+                        hasToken: !!currentToken,
+                        tokenLength: currentToken?.length || 0,
+                        tokenPreview: currentToken ? `${currentToken.substring(0, 20)}...` : 'No token'
+                      });
+
+                      // Si no hay token, intentar autenticación automática
+                      if (!currentToken) {
+                        console.log('🔐 Intentando autenticación automática...');
+                        setIsAuthenticating(true);
+                        try {
+                          const authModule = await import('../lib/authManager');
+                          const authManager = authModule.authManager || authModule.default;
+                          if (authManager && typeof authManager.ensureAuthenticated === 'function') {
+                            const authResult = await authManager.ensureAuthenticated();
+                            console.log('🔐 Resultado de autenticación automática:', authResult);
+                            if (!authResult) {
+                              throw new Error('No se pudo autenticar automáticamente');
+                            }
+                          }
+                        } catch (authError) {
+                          console.error('❌ Error en autenticación automática:', authError);
+                          toast.toast({
+                            title: 'Error de autenticación',
+                            description: 'No se pudo verificar la autenticación. Intente iniciar sesión nuevamente.',
+                            variant: 'destructive'
+                          });
+                          return;
+                        } finally {
+                          setIsAuthenticating(false);
+                        }
+                      }
+
+                      // Validar que el apartado tenga un ID válido
+                      if (!selectedApartado?.id) {
+                        console.error('❌ Error - El apartado no tiene ID válido:', selectedApartado);
+                        toast.toast({
+                          title: 'Error de datos',
+                          description: 'No se puede identificar el apartado. Intente recargar la página.',
+                          variant: 'destructive'
+                        });
+                        return;
+                      }
+
+                      // Mapear método de pago del frontend al formato del backend
+                      const paymentMethodMap: { [key: string]: string } = {
+                        'EFECTIVO': 'CASH_VES',
+                        'TRANSFERENCIA': 'TRANSFER',
+                        'PAGO_MOVIL': 'TRANSFER',
+                        'TARJETA': 'CARD',
+                        'CHEQUE': 'TRANSFER',
+                        'OTRO': 'MIXED'
+                      };
+
+                      const backendPaymentMethod = paymentMethodMap[paymentMethod] || 'CASH_VES';
+
+                      console.log('📤 Enviando datos del abono al backend:', {
+                        layawayId: selectedApartado.id,
+                        data: {
+                          amount,
+                          method: backendPaymentMethod,
+                          notes: notes || null,
+                          date: new Date().toISOString()
+                        }
+                      });
+
+                      const abonoResponse = await apiService.credits.addInstallment(selectedApartado.id, {
+                        amount,
+                        method: backendPaymentMethod,
+                        notes: notes || null,
+                        date: new Date().toISOString()
+                      });
+
+                      console.log('✅ Respuesta del backend al registrar abono:', abonoResponse);
+
+                      // Verificar que el abono se registró correctamente
+                      if (!abonoResponse || !abonoResponse.success) {
+                        throw new Error('El backend no confirmó que el abono se registró correctamente');
+                      }
 
                       toast.toast({
                         title: '✅ Abono registrado',
-                        description: `Se agregó un abono de Bs.S ${Intl.NumberFormat('es-VE').format(amount)} correctamente`,
+                        description: `Se agregó un abono de $${Intl.NumberFormat('en-US').format(amount)} correctamente`,
                       });
 
                       setNuevoAbonoModalOpen(false);
 
-                      // Recargar información del apartado
-                      const resp = await apiService.credits.getById(selectedApartado.id);
-                      setSelectedApartado(resp.layaway || resp);
+                      // Función para refrescar datos del apartado
+                      const refreshApartadoData = async () => {
+                        try {
+                          console.log('🔄 Refrescando datos del apartado manualmente...');
 
-                      // Recargar lista de apartados del cliente
-                      const creditsResp = await apiService.credits.getByCustomer(selectedCustomer.id);
-                      const credits = creditsResp.layaways || creditsResp.data || creditsResp || [];
-                      setApartadoData(credits);
+                          // Recargar información del apartado
+                          const apartadoResp = await apiService.credits.getById(selectedApartado.id);
+                          const updatedApartado = apartadoResp.layaway || apartadoResp;
+
+                          console.log('📥 Datos del apartado refrescados:', {
+                            id: updatedApartado.id,
+                            amount: updatedApartado.amount,
+                            total: updatedApartado.total,
+                            paymentsCount: updatedApartado.payments?.length || 0,
+                            payments: updatedApartado.payments?.map(p => ({ id: p.id, amount: p.amount, method: p.method }))
+                          });
+
+                          setSelectedApartado(updatedApartado);
+
+                          // Recargar lista de apartados del cliente
+                          const creditsResp = await apiService.credits.getByCustomer(selectedCustomer.id);
+                          const credits = creditsResp.layaways || creditsResp.data || creditsResp || [];
+                          setApartadoData(Array.isArray(credits) ? credits : []);
+
+                          // Refrescar estadísticas del dashboard
+                          console.log('📊 Refrescando estadísticas del dashboard después del abono...');
+                          await fetchDashboardStats();
+
+                          console.log('✅ Datos refrescados correctamente');
+                        } catch (error) {
+                          console.error('❌ Error al refrescar datos:', error);
+                        }
+                      };
+
+                      // Refrescar datos inmediatamente
+                      await refreshApartadoData();
 
                     } catch (e: any) {
+                      console.error('❌ Error al registrar abono:', e);
+                      console.error('❌ Detalles del error:', {
+                        message: e?.message,
+                        status: e?.status,
+                        response: e?.response,
+                        stack: e?.stack
+                      });
+
+                      let errorMessage = 'No se pudo procesar el abono. Intente nuevamente.';
+                      let errorTitle = 'Error al registrar abono';
+
+                      if (e?.status === 401 || e?.message?.includes('401') || e?.message?.includes('Unauthorized')) {
+                        errorTitle = 'Sesión expirada';
+                        errorMessage = 'Su sesión ha expirado. La página se recargará para renovar la autenticación.';
+                        console.log('🔐 Error de autenticación detectado - recargando página en 3 segundos...');
+                        setTimeout(() => {
+                          window.location.reload();
+                        }, 3000);
+                      } else if (e?.status === 403 || e?.message?.includes('403') || e?.message?.includes('Forbidden')) {
+                        errorTitle = 'Acceso denegado';
+                        errorMessage = 'No tiene permisos para realizar esta acción.';
+                      } else if (e?.message?.includes('404')) {
+                        errorMessage = 'El servicio no está disponible. Verifique la conexión con el servidor.';
+                      } else if (e?.message?.includes('500')) {
+                        errorMessage = 'Error interno del servidor. Contacte al administrador.';
+                      } else if (e?.message?.includes('400')) {
+                        errorMessage = 'Datos inválidos enviados. Verifique la información e intente nuevamente.';
+                      } else if (e?.message) {
+                        errorMessage = e.message;
+                      }
+
                       toast.toast({
-                        title: 'Error al registrar abono',
-                        description: e?.message || 'No se pudo procesar el abono. Intente nuevamente.',
+                        title: errorTitle,
+                        description: errorMessage,
                         variant: 'destructive'
                       });
                     }
                   }}
+                  disabled={isAuthenticating}
                   className="px-6 bg-green-600 hover:bg-green-700 text-white flex items-center gap-2"
                 >
-                  <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                    <path d="M20 6L9 17l-5-5"/>
-                  </svg>
-                  Registrar Abono
+                  {isAuthenticating ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Verificando autenticación...
+                    </>
+                  ) : (
+                    <>
+                      <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                        <path d="M20 6L9 17l-5-5"/>
+                      </svg>
+                      Registrar Abono
+                    </>
+                  )}
                 </Button>
               </div>
             </div>

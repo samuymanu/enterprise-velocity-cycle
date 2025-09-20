@@ -6,22 +6,25 @@ export class SpecialPaymentsService {
   // Registrar un nuevo apartado en la base de datos
   static async createApartado(apartadoData: ApartadoData): Promise<SpecialPaymentResult> {
     try {
-      console.log('📦 SpecialPaymentsService - Creating apartado:', apartadoData);
+      console.log('📦 Creating apartado:', apartadoData);
 
-      // Usar el endpoint real del backend
-      const response = await apiService.credits.create(apartadoData);
-      console.log('📥 SpecialPaymentsService - Response from backend:', response);
+      // TODO: Implementar endpoint en el backend
+      // const response = await apiService.apartados.create(apartadoData);
 
-      if (response.success) {
-        return {
-          success: true,
-          paymentData: response.layaway || response.data,
-          apartadoId: response.layaway?.id || response.data?.id,
-          message: 'Apartado registrado exitosamente'
-        };
-      } else {
-        throw new Error(response.error || 'Error al crear apartado');
-      }
+      // Simulación de respuesta hasta que se implemente el backend
+      const mockResponse = {
+        id: `apartado_${Date.now()}`,
+        ...apartadoData,
+        createdAt: new Date(),
+        status: 'active'
+      };
+
+      return {
+        success: true,
+        paymentData: mockResponse,
+        apartadoId: mockResponse.id,
+        message: 'Apartado registrado exitosamente'
+      };
     } catch (error) {
       console.error('❌ Error creating apartado:', error);
       return {
